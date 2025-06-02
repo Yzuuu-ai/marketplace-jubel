@@ -53,56 +53,7 @@ const upload = multer({
     }
 });
 
-// User Schema
-const userSchema = new mongoose.Schema({
-    username: { type: String, required: true, unique: true },
-    email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
-    walletAddress: { type: String },
-    isVerified: { type: Boolean, default: false },
-    reputation: { type: Number, default: 0 },
-    createdAt: { type: Date, default: Date.now }
-});
 
-const User = mongoose.model('User', userSchema);
-
-// Product Schema
-const productSchema = new mongoose.Schema({
-    title: { type: String, required: true },
-    description: { type: String, required: true },
-    game: { type: String, required: true },
-    category: { type: String, required: true },
-    price: { type: Number, required: true },
-    currency: { type: String, default: 'ETH' },
-    images: [{ type: String }],
-    seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    status: { type: String, enum: ['active', 'sold', 'inactive'], default: 'active' },
-    gameDetails: {
-        level: String,
-        rank: String,
-        characters: [String],
-        items: [String],
-        serverRegion: String
-    },
-    createdAt: { type: Date, default: Date.now },
-    updatedAt: { type: Date, default: Date.now }
-});
-
-const Product = mongoose.model('Product', productSchema);
-
-// Transaction Schema
-const transactionSchema = new mongoose.Schema({
-    buyer: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    seller: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
-    amount: { type: Number, required: true },
-    currency: { type: String, required: true },
-    txHash: { type: String },
-    status: { type: String, enum: ['pending', 'confirmed', 'failed', 'completed'], default: 'pending' },
-    createdAt: { type: Date, default: Date.now }
-});
-
-const Transaction = mongoose.model('Transaction', transactionSchema);
 
 // Auth Middleware
 const authenticateToken = (req, res, next) => {
