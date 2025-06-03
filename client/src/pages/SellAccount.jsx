@@ -4,6 +4,14 @@ import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
 
+// Reuse order constants from Pesanan.jsx
+const ORDER_STATUS = {
+  CART: 'keranjang',
+  ORDER: 'pesanan', 
+  FAILED: 'gagal',
+  COMPLETED: 'selesai'
+};
+
 const SellAccount = () => {
   const { walletAddress, isAuthenticated } = useAuth();
   const navigate = useNavigate();
@@ -25,8 +33,8 @@ const SellAccount = () => {
   const [error, setError] = useState('');
   const [previewImage, setPreviewImage] = useState('');
   const [myListings, setMyListings] = useState([]);
+  const [filterStatus, setFilterStatus] = useState('all');
 
-  // Daftar game yang tersedia
   useEffect(() => {
     if (!isAuthenticated) {
       navigate('/login');
@@ -40,7 +48,6 @@ const SellAccount = () => {
     ]);
   }, [isAuthenticated, navigate]);
 
-  // Fungsi untuk menghasilkan judul akun secara otomatis
   const generateAccountTitle = useCallback((gameId) => {
     const game = games.find(g => g.id === parseInt(gameId));
     if (!game) return '';
@@ -50,13 +57,18 @@ const SellAccount = () => {
     return `${game.code}-${nextNumber.toString().padStart(3, '0')}`;
   }, [games]);
 
-  // Fungsi untuk mendapatkan daftar akun dari localStorage milik wallet saat ini
   const getMyListings = useCallback(() => {
     const allAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
-    return allAccounts.filter(acc => acc.sellerWallet === walletAddress);
-  }, [walletAddress]);
+    const myAccounts = allAccounts.filter(acc => acc.sellerWallet === walletAddress);
+    
+    if (filterStatus === 'available') {
+      return myAccounts.filter(acc => !acc.isSold);
+    } else if (filterStatus === 'sold') {
+      return myAccounts.filter(acc => acc.isSold);
+    }
+    return myAccounts;
+  }, [walletAddress, filterStatus]);
 
-  // Perbarui daftar akun yang terdaftar
   const refreshListings = useCallback(() => {
     setMyListings(getMyListings());
   }, [getMyListings]);
@@ -71,7 +83,6 @@ const SellAccount = () => {
     const { name, value } = e.target;
     const newFormData = { ...formData, [name]: value };
 
-    // Jika game dipilih, generate judul otomatis dan pasang gambar default game
     if (name === 'gameId' && value) {
       const selectedGame = games.find(g => g.id === parseInt(value));
       newFormData.title = generateAccountTitle(value);
@@ -99,14 +110,12 @@ const SellAccount = () => {
     setError('');
 
     try {
-      // Validasi form: pastikan field yang wajib diisi sudah terisi
       if (!formData.gameId || !formData.title || !formData.price) {
         throw new Error('Harap isi semua field yang wajib diisi');
       }
       
       const existingAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
 
-      // Jika dalam mode editing, perbarui data akun yang ada
       if (isEditing) {
         const updatedAccounts = existingAccounts.map(acc =>
           acc.id === editingAccountId
@@ -124,9 +133,8 @@ const SellAccount = () => {
         );
         localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
       } else {
-        // Buat akun baru
         const newAccount = {
-          id: Date.now(), // ID unik berdasarkan timestamp
+          id: Date.now(),
           gameId: parseInt(formData.gameId),
           title: formData.title,
           level: formData.level,
@@ -136,13 +144,16 @@ const SellAccount = () => {
           image: formData.image,
           sellerWallet: walletAddress,
           sellerName: `Seller-${walletAddress.substring(0, 6)}`,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          isSold: false,
+          soldAt: null,
+          buyerWallet: null,
+          buyerName: null
         };
         const updatedAccounts = [...existingAccounts, newAccount];
         localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
       }
       
-      // Reset form dan mode editing
       setFormData({
         gameId: '',
         title: '',
@@ -172,16 +183,28 @@ const SellAccount = () => {
     }
   };
 
-  // Fungsi hapus akun
   const handleDelete = (id) => {
+    // First remove from gameAccounts
     const existingAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
     const updatedAccounts = existingAccounts.filter(acc => acc.id !== id);
     localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
+    
+    // Then remove from orders if exists
+    const existingOrders = JSON.parse(localStorage.getItem('orders') || '[]');
+    const updatedOrders = existingOrders.filter(order => 
+      !(order.isAccount && order.accountId === id)
+    );
+    localStorage.setItem('orders', JSON.stringify(updatedOrders));
+    
     refreshListings();
   };
 
-  // Fungsi edit akun: masukkan data akun ke form untuk diperbarui
   const handleEdit = (account) => {
+    if (account.isSold) {
+      alert('Akun yang sudah terjual tidak dapat diedit');
+      return;
+    }
+
     setFormData({
       gameId: account.gameId.toString(),
       title: account.title,
@@ -197,11 +220,57 @@ const SellAccount = () => {
     setActiveTab('sell');
   };
 
+  const handleMarkAsSold = (id, buyerAddress = null) => {
+    const existingAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
+    const updatedAccounts = existingAccounts.map(acc =>
+      acc.id === id
+        ? {
+            ...acc,
+            isSold: true,
+            soldAt: new Date().toISOString(),
+            buyerWallet: buyerAddress || `0x${Math.random().toString(16).substring(2, 42)}`,
+            buyerName: buyerAddress ? `Buyer-${buyerAddress.substring(0, 6)}` : `Buyer-${Math.random().toString(16).substring(2, 8)}`
+          }
+        : acc
+    );
+    localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
+    refreshListings();
+  };
+
+  const handleMarkAsAvailable = (id) => {
+    const existingAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
+    const updatedAccounts = existingAccounts.map(acc =>
+      acc.id === id
+        ? {
+            ...acc,
+            isSold: false,
+            soldAt: null,
+            buyerWallet: null,
+            buyerName: null
+          }
+        : acc
+    );
+    localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
+    refreshListings();
+  };
+
+  const getAccountStats = () => {
+    const allMyAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]')
+      .filter(acc => acc.sellerWallet === walletAddress);
+    
+    return {
+      total: allMyAccounts.length,
+      available: allMyAccounts.filter(acc => !acc.isSold).length,
+      sold: allMyAccounts.filter(acc => acc.isSold).length
+    };
+  };
+
+  const stats = getAccountStats();
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
       
-      {/* Hero Section */}
       <section className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center">
@@ -217,7 +286,6 @@ const SellAccount = () => {
         </div>
       </section>
 
-      {/* Tabs Navigation */}
       <section className="py-4">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-center gap-4">
           <button
@@ -244,14 +312,12 @@ const SellAccount = () => {
             onClick={() => setActiveTab('list')}
             className={`px-4 py-2 rounded-lg font-medium transition ${activeTab === 'list' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
           >
-            Akun Terdaftar
+            Akun Terdaftar ({stats.total})
           </button>
         </div>
       </section>
 
-      {/* Konten Tab */}
       {activeTab === 'sell' ? (
-        // Form Jual Akun / Edit
         <section className="py-12">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="bg-white rounded-xl shadow-md p-6 md:p-8">
@@ -283,7 +349,6 @@ const SellAccount = () => {
                   )}
                   
                   <form onSubmit={handleSubmit}>
-                    {/* Image Preview and Upload */}
                     <div className="mb-6">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Gambar Akun
@@ -454,7 +519,6 @@ const SellAccount = () => {
               )}
             </div>
             
-            {/* Informasi tambahan */}
             <div className="mt-8 bg-blue-50 p-6 rounded-xl">
               <h3 className="text-lg font-semibold text-blue-800 mb-3">Tips Menjual Akun</h3>
               <ul className="space-y-3 text-blue-700">
@@ -483,48 +547,184 @@ const SellAccount = () => {
           </div>
         </section>
       ) : (
-        // Daftar Akun Terdaftar
         <section className="py-12">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6 text-center">Akun Terdaftar</h2>
+            <div className="mb-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                <h2 className="text-2xl font-bold text-gray-900">Akun Terdaftar</h2>
+                
+                <div className="flex gap-4 text-sm">
+                  <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full">
+                    Total: {stats.total}
+                  </div>
+                  <div className="bg-green-100 text-green-800 px-3 py-1 rounded-full">
+                    Tersedia: {stats.available}
+                  </div>
+                  <div className="bg-red-100 text-red-800 px-3 py-1 rounded-full">
+                    Terjual: {stats.sold}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setFilterStatus('all')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                    filterStatus === 'all' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  Semua ({stats.total})
+                </button>
+                <button
+                  onClick={() => setFilterStatus('available')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                    filterStatus === 'available' ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  Tersedia ({stats.available})
+                </button>
+                <button
+                  onClick={() => setFilterStatus('sold')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                    filterStatus === 'sold' ? 'bg-red-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  Terjual ({stats.sold})
+                </button>
+              </div>
+            </div>
+
             {myListings.length === 0 ? (
-              <p className="text-center text-gray-600">Belum ada akun yang dijual.</p>
+              <div className="text-center py-8">
+                <p className="text-gray-600">
+                  {filterStatus === 'all' ? 'Belum ada akun yang dijual.' :
+                   filterStatus === 'available' ? 'Belum ada akun yang tersedia.' :
+                   'Belum ada akun yang terjual.'}
+                </p>
+              </div>
             ) : (
               <div className="grid gap-6">
                 {myListings.map(account => (
-                  <div key={account.id} className="bg-white rounded-xl shadow-md p-4 flex flex-col sm:flex-row items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-300">
-                        <img src={account.image} alt={account.title} className="w-full h-full object-cover" />
+                  <div key={account.id} className={`bg-white rounded-xl shadow-md p-4 border-l-4 ${
+                    account.isSold ? 'border-red-500 bg-red-50' : 'border-green-500'
+                  }`}>
+                    <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                      <div className="flex items-center gap-4 flex-1">
+                        <div className="relative">
+                          <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-300">
+                            <img src={account.image} alt={account.title} className="w-full h-full object-cover" />
+                          </div>
+                          {account.isSold && (
+                            <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs px-1 py-0.5 rounded-full">
+                              SOLD
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-gray-900">{account.title}</h4>
+                          <p className="text-sm text-gray-600">Harga: {account.price}</p>
+                          {account.level && <p className="text-sm text-gray-500">Level: {account.level}</p>}
+                          {account.rank && <p className="text-sm text-gray-500">Rank: {account.rank}</p>}
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="font-semibold text-gray-900">{account.title}</h4>
-                        <p className="text-sm text-gray-600">Harga: {account.price}</p>
+
+                      {account.isSold ? (
+                        <div className="bg-red-100 border border-red-200 rounded-lg p-3 min-w-0 lg:min-w-[250px]">
+                          <div className="flex items-center gap-2 mb-2">
+                            <svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            <span className="text-sm font-medium text-red-800">TERJUAL</span>
+                          </div>
+                          <div className="text-xs text-red-700 space-y-1">
+                            <p><strong>Dibeli oleh:</strong></p>
+                            <p className="break-all">{account.buyerName}</p>
+                            <p className="break-all text-gray-600">{account.buyerWallet}</p>
+                            <p><strong>Tanggal:</strong> {new Date(account.soldAt).toLocaleDateString('id-ID')}</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-green-100 border border-green-200 rounded-lg p-3 min-w-0 lg:min-w-[200px]">
+                          <div className="flex items-center gap-2 mb-2">
+                            <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <span className="text-sm font-medium text-green-800">TERSEDIA</span>
+                          </div>
+                          <p className="text-xs text-green-700">
+                            Ditambahkan: {new Date(account.createdAt).toLocaleDateString('id-ID')}
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="flex gap-2 flex-wrap">
+                        {!account.isSold ? (
+                          <>
+                            <button
+                              onClick={() => handleEdit(account)}
+                              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDelete(account.id)}
+                              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm"
+                            >
+                              Hapus
+                            </button>
+                            <button
+                              onClick={() => handleMarkAsSold(account.id)}
+                              className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition text-sm"
+                              title="Simulasi: Tandai sebagai terjual"
+                            >
+                              Tandai Terjual
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => handleDelete(account.id)}
+                              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm"
+                            >
+                              Hapus
+                            </button>
+                            <button
+                              onClick={() => handleMarkAsAvailable(account.id)}
+                              className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition text-sm"
+                              title="Simulasi: Kembalikan ke status tersedia"
+                            >
+                              Reset Status
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
-                    <div className="flex gap-2 mt-4 sm:mt-0">
-                      <button
-                        onClick={() => handleEdit(account)}
-                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(account.id)}
-                        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
-                      >
-                        Hapus
-                      </button>
-                    </div>
+
+                    {account.description && (
+                      <div className="mt-4 pt-4 border-t border-gray-200">
+                        <p className="text-sm text-gray-600">{account.description}</p>
+                      </div>
+                    )}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {myListings.length > 0 && (
+              <div className="mt-8 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <h4 className="font-medium text-yellow-800 mb-2">Info Testing:</h4>
+                <ul className="text-sm text-yellow-700 space-y-1">
+                  <li>• Tombol "Tandai Terjual" digunakan untuk simulasi ketika akun dibeli</li>
+                  <li>• Tombol "Reset Status" untuk mengembalikan akun ke status tersedia (testing)</li>
+                  <li>• Akun yang sudah terjual tidak dapat diedit</li>
+                  <li>• Filter untuk melihat akun berdasarkan status</li>
+                </ul>
               </div>
             )}
           </div>
         </section>
       )}
 
-      {/* Footer */}
       <footer className="bg-gray-900 text-white mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="border-t border-gray-800 pt-8 text-center text-gray-400">

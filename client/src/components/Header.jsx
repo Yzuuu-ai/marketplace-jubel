@@ -119,14 +119,14 @@ const Header = () => {
 
                       {/* Keranjang */}
                       <Link
-                        to="/cart"
+                        to="/riwayat-transaksi"
                         className="flex items-center px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                         onClick={handleMenuClick}
                       >
                         <svg className="w-4 h-4 mr-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4m1.6 8L5 3H3m4 10v6a1 1 0 001 1h10a1 1 0 001-1v-6" />
                         </svg>
-                        Keranjang
+                        Riwayat Transaksi
                         {/* Badge untuk jumlah item di keranjang (opsional) */}
                         <span className="ml-auto bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5 rounded-full">3</span>
                       </Link>
