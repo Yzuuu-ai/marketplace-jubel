@@ -14,6 +14,14 @@ const TRANSACTION_STATUS = {
   CANCELLED: 'dibatalkan'
 };
 
+// Using status from ORDER_STATUS for mapping
+const ORDER_STATUS = {
+  CART: 'keranjang',
+  ORDER: 'pesanan', 
+  FAILED: 'gagal',
+  COMPLETED: 'selesai'
+};
+
 const STATUS_LABELS = {
   [TRANSACTION_STATUS.PENDING]: 'Pending',
   [TRANSACTION_STATUS.COMPLETED]: 'Selesai',
@@ -45,80 +53,6 @@ const TYPE_COLORS = {
   [TRANSACTION_TYPES.SALE]: 'text-green-600'
 };
 
-// Sample transaction data structure
-const generateSampleTransactions = () => [
-  {
-    id: 'tx-001',
-    type: TRANSACTION_TYPES.PURCHASE,
-    status: TRANSACTION_STATUS.COMPLETED,
-    itemTitle: 'Akun Mobile Legends Level 50',
-    gameName: 'Mobile Legends',
-    price: '0.001500 ETH',
-    priceIDR: 75000,
-    sellerName: 'GamerPro123',
-    buyerName: 'CurrentUser',
-    paymentMethod: 'Ethereum (ETH)',
-    transactionHash: '0x1234567890abcdef1234567890abcdef12345678',
-    networkFee: '0.000050 ETH',
-    totalAmount: '0.001550 ETH',
-    createdAt: Date.now() - 86400000, // 1 day ago
-    completedAt: Date.now() - 86000000,
-    image: 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=100&h=100&fit=crop'
-  },
-  {
-    id: 'tx-002',
-    type: TRANSACTION_TYPES.SALE,
-    status: TRANSACTION_STATUS.COMPLETED,
-    itemTitle: 'Akun PUBG Rank Crown',
-    gameName: 'PUBG Mobile',
-    price: '0.002000 ETH',
-    priceIDR: 100000,
-    sellerName: 'CurrentUser',
-    buyerName: 'PlayerXYZ',
-    paymentMethod: 'Ethereum (ETH)',
-    transactionHash: '0xabcdef1234567890abcdef1234567890abcdef12',
-    networkFee: '0.000075 ETH',
-    totalAmount: '0.001925 ETH', // Price minus fee for seller
-    createdAt: Date.now() - 172800000, // 2 days ago
-    completedAt: Date.now() - 172400000,
-    image: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=100&h=100&fit=crop'
-  },
-  {
-    id: 'tx-003',
-    type: TRANSACTION_TYPES.PURCHASE,
-    status: TRANSACTION_STATUS.PENDING,
-    itemTitle: 'Akun Free Fire Elite Pass',
-    gameName: 'Free Fire',
-    price: '0.001000 ETH',
-    priceIDR: 50000,
-    sellerName: 'FFMaster',
-    buyerName: 'CurrentUser',
-    paymentMethod: 'Ethereum (ETH)',
-    networkFee: '0.000040 ETH',
-    totalAmount: '0.001040 ETH',
-    createdAt: Date.now() - 3600000, // 1 hour ago
-    image: 'https://images.unsplash.com/photo-1593305841991-05c297ba4575?w=100&h=100&fit=crop'
-  },
-  {
-    id: 'tx-004',
-    type: TRANSACTION_TYPES.SALE,
-    status: TRANSACTION_STATUS.FAILED,
-    itemTitle: 'Akun Genshin Impact AR 45',
-    gameName: 'Genshin Impact',
-    price: '0.003000 ETH',
-    priceIDR: 150000,
-    sellerName: 'CurrentUser',
-    buyerName: 'GenshinFan',
-    paymentMethod: 'Ethereum (ETH)',
-    networkFee: '0.000100 ETH',
-    totalAmount: '0.002900 ETH',
-    createdAt: Date.now() - 259200000, // 3 days ago
-    failedAt: Date.now() - 258800000,
-    failureReason: 'Payment timeout',
-    image: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=100&h=100&fit=crop'
-  }
-];
-
 const formatDate = (timestamp) => {
   return new Date(timestamp).toLocaleString('id-ID', {
     year: 'numeric',
@@ -136,6 +70,75 @@ const formatCurrency = (amount, currency = 'IDR') => {
   return amount;
 };
 
+// Convert order status to transaction status with improved logic
+const mapOrderStatusToTransactionStatus = (order) => {
+  if (order.status === ORDER_STATUS.COMPLETED) {
+    return TRANSACTION_STATUS.COMPLETED;
+  }
+  
+  if (order.status === ORDER_STATUS.FAILED) {
+    return TRANSACTION_STATUS.FAILED;
+  }
+  
+  // Check if order has transaction hash (assume completed if has hash)
+  if (order.transactionHash) {
+    return TRANSACTION_STATUS.COMPLETED;
+  }
+  
+  // Check if order is expired (older than 15 minutes)
+  const orderAge = Date.now() - (order.createdAt || Date.now());
+  const FIFTEEN_MINUTES = 15 * 60 * 1000;
+  
+  if (orderAge > FIFTEEN_MINUTES) {
+    return TRANSACTION_STATUS.FAILED;
+  }
+  
+  return TRANSACTION_STATUS.PENDING;
+};
+
+// Convert orders to transactions with improved status handling
+const convertOrdersToTransactions = (orders) => {
+  return orders
+    .filter(order => order.status !== ORDER_STATUS.CART) // Exclude cart items
+    .map(order => {
+      const basePrice = parseFloat(order.originalPrice?.toString().replace(/[^\d.]/g, '') || 
+                       parseFloat(order.price?.toString().replace(/[^\d.]/g, '') || 0));
+      
+      const status = mapOrderStatusToTransactionStatus(order);
+      const isCompleted = status === TRANSACTION_STATUS.COMPLETED;
+      const isFailed = status === TRANSACTION_STATUS.FAILED;
+      
+      return {
+        id: order.id,
+        type: TRANSACTION_TYPES.PURCHASE, // Assuming all orders are purchases
+        status,
+        itemTitle: order.title,
+        gameName: order.gameName,
+        price: order.price,
+        priceIDR: order.totalPriceIDR ? parseFloat(order.totalPriceIDR) : basePrice,
+        sellerName: order.sellerName || 'Penjual',
+        buyerName: 'Anda', // Current user is always the buyer
+        paymentMethod: order.paymentMethod || 'Ethereum (ETH)',
+        transactionHash: order.transactionHash || null,
+        networkFee: order.gasFee ? `${order.gasFee} ETH` : '0.000050 ETH',
+        totalAmount: order.totalPriceETH ? `${order.totalPriceETH} ETH` : order.price,
+        createdAt: order.createdAt || Date.now(),
+        completedAt: isCompleted ? (order.completedAt || order.createdAt) : null,
+        failedAt: isFailed ? (order.failedAt || order.createdAt) : null,
+        failureReason: isFailed ? (order.failureReason || 'Waktu pembayaran habis') : null,
+        image: order.image || 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=100&h=100&fit=crop',
+        // Additional order specific data
+        level: order.level,
+        rank: order.rank,
+        description: order.description,
+        paymentAddress: order.paymentAddress,
+        paymentNetwork: order.paymentNetwork,
+        minConfirmations: order.minConfirmations
+      };
+    });
+};
+
+// TransactionDetailModal component remains the same
 const TransactionDetailModal = ({ transaction, onClose }) => {
   if (!transaction) return null;
 
@@ -185,8 +188,17 @@ const TransactionDetailModal = ({ transaction, onClose }) => {
                   <div>
                     <p className="font-medium text-gray-800">{transaction.itemTitle}</p>
                     <p className="text-sm text-gray-600">{transaction.gameName}</p>
+                    {transaction.level && (
+                      <p className="text-sm text-gray-600">Level: {transaction.level}</p>
+                    )}
+                    {transaction.rank && (
+                      <p className="text-sm text-gray-600">Rank: {transaction.rank}</p>
+                    )}
                   </div>
                 </div>
+                {transaction.description && (
+                  <p className="text-sm text-gray-600">{transaction.description}</p>
+                )}
               </div>
             </div>
 
@@ -214,10 +226,12 @@ const TransactionDetailModal = ({ transaction, onClose }) => {
                   <span className="text-gray-600">Harga Item:</span>
                   <span className="font-medium">{transaction.price}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Dalam IDR:</span>
-                  <span className="font-medium">{formatCurrency(transaction.priceIDR)}</span>
-                </div>
+                {transaction.priceIDR && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Dalam IDR:</span>
+                    <span className="font-medium">{formatCurrency(transaction.priceIDR)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-gray-600">Network Fee:</span>
                   <span className="font-medium">{transaction.networkFee}</span>
@@ -233,6 +247,20 @@ const TransactionDetailModal = ({ transaction, onClose }) => {
                   <p className="text-sm font-medium text-gray-600">Metode Pembayaran</p>
                   <p className="text-gray-800">{transaction.paymentMethod}</p>
                 </div>
+                {transaction.paymentNetwork && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Network</p>
+                    <p className="text-gray-800">{transaction.paymentNetwork}</p>
+                  </div>
+                )}
+                {transaction.paymentAddress && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Payment Address</p>
+                    <p className="font-mono text-xs text-gray-600 break-all">
+                      {transaction.paymentAddress}
+                    </p>
+                  </div>
+                )}
                 {transaction.transactionHash && (
                   <div>
                     <p className="text-sm font-medium text-gray-600">Transaction Hash</p>
@@ -302,6 +330,7 @@ const TransactionDetailModal = ({ transaction, onClose }) => {
   );
 };
 
+// TransactionCard component remains the same
 const TransactionCard = ({ transaction, onClick }) => {
   const isPurchase = transaction.type === TRANSACTION_TYPES.PURCHASE;
   
@@ -385,17 +414,42 @@ const RiwayatTransaksi = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    // Load transactions from localStorage or use sample data
-    const storedTransactions = JSON.parse(localStorage.getItem('transactions') || '[]');
-    if (storedTransactions.length === 0) {
-      const sampleTransactions = generateSampleTransactions();
-      setTransactions(sampleTransactions);
-      localStorage.setItem('transactions', JSON.stringify(sampleTransactions));
-    } else {
-      setTransactions(storedTransactions);
-    }
+    // Load transactions from orders data
+    const loadTransactions = () => {
+      try {
+        // Get orders from localStorage
+        const storedOrders = JSON.parse(localStorage.getItem('orders') || '[]');
+        
+        // Convert orders to transactions with improved status handling
+        const transactionsFromOrders = convertOrdersToTransactions(storedOrders);
+        
+        // Sort by date (newest first)
+        transactionsFromOrders.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        
+        setTransactions(transactionsFromOrders);
+        
+        // Update localStorage with clean transactions
+        localStorage.setItem('transactions', JSON.stringify(transactionsFromOrders));
+      } catch (error) {
+        console.error('Error loading transactions:', error);
+        setTransactions([]);
+      }
+    };
+
+    loadTransactions();
+
+    // Listen for storage changes (when orders are updated)
+    const handleStorageChange = (e) => {
+      if (e.key === 'orders') {
+        loadTransactions();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
+  // Filter transactions based on selected filters
   const filteredTransactions = transactions.filter(transaction => {
     const matchesType = filterType === 'all' || transaction.type === filterType;
     const matchesStatus = filterStatus === 'all' || transaction.status === filterStatus;
@@ -405,11 +459,19 @@ const RiwayatTransaksi = () => {
     return matchesType && matchesStatus && matchesSearch;
   });
 
+  // Calculate transaction statistics
   const totalTransactions = transactions.length;
   const completedTransactions = transactions.filter(t => t.status === TRANSACTION_STATUS.COMPLETED).length;
-  const totalVolume = transactions
-    .filter(t => t.status === TRANSACTION_STATUS.COMPLETED)
-    .reduce((sum, t) => sum + parseFloat(t.price.replace(/[^\d.]/g, '')), 0);
+  const failedTransactions = transactions.filter(t => t.status === TRANSACTION_STATUS.FAILED).length;
+  const pendingTransactions = transactions.filter(t => t.status === TRANSACTION_STATUS.PENDING).length;
+
+  // Status tabs for responsive filtering
+  const statusTabs = [
+    { id: 'all', label: 'Semua', count: totalTransactions },
+    { id: TRANSACTION_STATUS.PENDING, label: 'Pending', count: pendingTransactions },
+    { id: TRANSACTION_STATUS.COMPLETED, label: 'Selesai', count: completedTransactions },
+    { id: TRANSACTION_STATUS.FAILED, label: 'Gagal', count: failedTransactions },
+  ];
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -447,48 +509,66 @@ const RiwayatTransaksi = () => {
             <div className="bg-white rounded-xl shadow-lg p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-gray-600 text-sm font-medium">Total Volume</p>
-                  <p className="text-2xl font-bold text-blue-600">{totalVolume.toFixed(4)} ETH</p>
+                  <p className="text-gray-600 text-sm font-medium">Transaksi Gagal</p>
+                  <p className="text-3xl font-bold text-red-600">{failedTransactions}</p>
                 </div>
-                <div className="text-4xl">💰</div>
+                <div className="text-4xl">❌</div>
               </div>
             </div>
           </div>
 
-          {/* Filters */}
+          {/* Responsive Filters */}
           <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-            <div className="flex flex-wrap gap-4 items-center">
-              <div className="flex-1 min-w-[200px]">
-                <input
-                  type="text"
-                  placeholder="Cari transaksi..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
+            {/* Search Input */}
+            <div className="mb-6">
+              <input
+                type="text"
+                placeholder="Cari transaksi..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            
+            {/* Filter Row */}
+            <div className="flex flex-col md:flex-row gap-4">
+              {/* Type Filter */}
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tipe Transaksi
+                </label>
+                <select
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="all">Semua Tipe</option>
+                  <option value={TRANSACTION_TYPES.PURCHASE}>Pembelian</option>
+                  <option value={TRANSACTION_TYPES.SALE}>Penjualan</option>
+                </select>
               </div>
               
-              <select
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="all">Semua Tipe</option>
-                <option value={TRANSACTION_TYPES.PURCHASE}>Pembelian</option>
-                <option value={TRANSACTION_TYPES.SALE}>Penjualan</option>
-              </select>
-              
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="all">Semua Status</option>
-                <option value={TRANSACTION_STATUS.PENDING}>Pending</option>
-                <option value={TRANSACTION_STATUS.COMPLETED}>Selesai</option>
-                <option value={TRANSACTION_STATUS.FAILED}>Gagal</option>
-                <option value={TRANSACTION_STATUS.CANCELLED}>Dibatalkan</option>
-              </select>
+              {/* Status Filter Tabs */}
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Status Transaksi
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {statusTabs.map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setFilterStatus(tab.id)}
+                      className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                        filterStatus === tab.id
+                          ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-md'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {tab.label} <span className="ml-1">({tab.count})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -511,7 +591,10 @@ const RiwayatTransaksi = () => {
                   Tidak Ada Transaksi
                 </h3>
                 <p className="text-gray-500">
-                  Tidak ada transaksi yang sesuai dengan filter yang dipilih
+                  {transactions.length === 0 
+                    ? "Belum ada transaksi yang dilakukan"
+                    : "Tidak ada transaksi yang sesuai dengan filter yang dipilih"
+                  }
                 </p>
               </div>
             </div>

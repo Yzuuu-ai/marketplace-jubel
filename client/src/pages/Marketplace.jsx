@@ -591,7 +591,7 @@ const Marketplace = () => {
           onNavigate={() => {
             setShowSuccessModal(false);
             setShowNavigationButton(false);
-            navigate('/pesanan');
+            navigate('/orders');
           }}
         />
       )}
