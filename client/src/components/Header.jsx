@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useAdmin } from '../context/AdminContext';
+
 
 const Header = () => {
   const { walletAddress, logout, isAuthenticated } = useAuth();

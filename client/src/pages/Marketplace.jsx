@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
-
+import { useAdmin } from '../context/AdminContext';
 // Data game untuk filter
 const gameList = [
   { id: 1, name: 'Mobile Legends' },
