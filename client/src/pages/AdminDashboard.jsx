@@ -430,3 +430,179 @@ const AdminDashboard = () => {
       </div>
     );
   }
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      
+      <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-8">
+        <div className="max-w-7xl mx-auto px-4">
+          <h1 className="text-3xl font-bold mb-2">Admin Dashboard</h1>
+          <p className="text-purple-100">Kelola transaksi escrow dan dispute</p>
+        </div>
+      </div>
+
+      {/* Stats Overview */}
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-600 text-sm">Total Transaksi</p>
+                <p className="text-2xl font-bold text-gray-800">{stats.totalTransactions}</p>
+              </div>
+              <div className="text-blue-500 text-3xl">📊</div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-600 text-sm">Active Escrow</p>
+                <p className="text-2xl font-bold text-green-600">{stats.activeEscrows}</p>
+              </div>
+              <div className="text-green-500 text-3xl">🔄</div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-600 text-sm">Pending Disputes</p>
+                <p className="text-2xl font-bold text-red-600">{stats.pendingDisputes}</p>
+              </div>
+              <div className="text-red-500 text-3xl">⚠️</div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-600 text-sm">Total Volume</p>
+                <p className="text-2xl font-bold text-blue-600">{stats.totalVolume.toFixed(4)} ETH</p>
+              </div>
+              <div className="text-blue-500 text-3xl">💰</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
+          <div className="flex flex-wrap gap-3 justify-center">
+            <button
+              onClick={() => setActiveTab('overview')}
+              className={`px-6 py-3 rounded-lg font-semibold text-sm transition ${
+                activeTab === 'overview'
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Overview ({escrowTransactions.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('active')}
+              className={`px-6 py-3 rounded-lg font-semibold text-sm transition ${
+                activeTab === 'active'
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Active ({filterTransactions('active').length})
+            </button>
+            <button
+              onClick={() => setActiveTab('pending')}
+              className={`px-6 py-3 rounded-lg font-semibold text-sm transition ${
+                activeTab === 'pending'
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Pending Payment ({filterTransactions('pending').length})
+            </button>
+            <button
+              onClick={() => setActiveTab('disputed')}
+              className={`px-6 py-3 rounded-lg font-semibold text-sm transition ${
+                activeTab === 'disputed'
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Disputed ({filterTransactions('disputed').length})
+            </button>
+          </div>
+        </div>
+
+        {/* Transactions List */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+          {filterTransactions(activeTab === 'overview' ? 'all' : activeTab).length > 0 ? (
+            filterTransactions(activeTab === 'overview' ? 'all' : activeTab).map(transaction => (
+              <EscrowTransactionCard
+                key={transaction.id}
+                transaction={transaction}
+                onAction={handleAction}
+              />
+            ))
+          ) : (
+            <div className="col-span-full text-center py-16">
+              <div className="bg-white rounded-xl shadow-lg p-12 max-w-md mx-auto">
+                <div className="text-6xl mb-4">📋</div>
+                <h3 className="text-xl font-bold text-gray-800 mb-2">
+                  Tidak Ada Transaksi
+                </h3>
+                <p className="text-gray-500">
+                  Belum ada transaksi untuk kategori ini.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Admin Actions Info */}
+        <div className="mt-12 bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+          <h3 className="font-bold text-yellow-800 mb-4">Admin Actions Guide</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-yellow-700">
+            <div>
+              <h4 className="font-semibold mb-2">Payment Confirmation:</h4>
+              <ul className="space-y-1">
+                <li>• Verify payment hash on blockchain</li>
+                <li>• Confirm payment amount matches</li>
+                <li>• Update transaction status</li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-2">Dispute Resolution:</h4>
+              <ul className="space-y-1">
+                <li>• Review dispute reason</li>
+                <li>• Check account delivery details</li>
+                <li>• Make fair decision based on evidence</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Modals */}
+      {showPaymentModal && selectedTransaction && (
+        <ConfirmPaymentModal
+          transaction={selectedTransaction}
+          onClose={() => {
+            setShowPaymentModal(false);
+            setSelectedTransaction(null);
+          }}
+          onConfirm={handleConfirmPayment}
+        />
+      )}
+
+      {showDetailModal && selectedTransaction && (
+        <TransactionDetailModal
+          transaction={selectedTransaction}
+          onClose={() => {
+            setShowDetailModal(false);
+            setSelectedTransaction(null);
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+export default AdminDashboard;
