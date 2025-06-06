@@ -19,7 +19,8 @@ export const ESCROW_STATUS = {
   BUYER_CONFIRMED: 'buyer_confirmed',
   COMPLETED: 'completed',
   DISPUTED: 'disputed',
-  REFUNDED: 'refunded'
+  REFUNDED: 'refunded',
+  CANCELLED: 'cancelled'
 };
 
 export const ESCROW_STATUS_LABELS = {
@@ -29,7 +30,8 @@ export const ESCROW_STATUS_LABELS = {
   [ESCROW_STATUS.BUYER_CONFIRMED]: 'Pembeli Konfirmasi',
   [ESCROW_STATUS.COMPLETED]: 'Selesai',
   [ESCROW_STATUS.DISPUTED]: 'Sengketa',
-  [ESCROW_STATUS.REFUNDED]: 'Dikembalikan'
+  [ESCROW_STATUS.REFUNDED]: 'Dikembalikan',
+  [ESCROW_STATUS.CANCELLED]: 'Dibatalkan'
 };
 
 export const ESCROW_STATUS_COLORS = {
@@ -39,7 +41,8 @@ export const ESCROW_STATUS_COLORS = {
   [ESCROW_STATUS.BUYER_CONFIRMED]: 'bg-green-500',
   [ESCROW_STATUS.COMPLETED]: 'bg-green-600',
   [ESCROW_STATUS.DISPUTED]: 'bg-red-500',
-  [ESCROW_STATUS.REFUNDED]: 'bg-gray-500'
+  [ESCROW_STATUS.REFUNDED]: 'bg-gray-500',
+  [ESCROW_STATUS.CANCELLED]: 'bg-gray-600'
 };
 
 // Admin wallet addresses (untuk demo)
@@ -48,7 +51,8 @@ const ADMIN_WALLETS = [
   '0xAdminWallet123456789012345678901234567890'
 ];
 
-const ESCROW_WALLET = '0xEscrowWallet123456789012345678901234567890';
+// Escrow wallet address
+export const ESCROW_WALLET = '0xEscrowWallet123456789012345678901234567890';
 
 export const AdminProvider = ({ children }) => {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -82,12 +86,12 @@ export const AdminProvider = ({ children }) => {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  // Create escrow transaction
+  // Create escrow transaction when buyer purchases
   const createEscrowTransaction = (orderData) => {
     const escrowTransaction = {
       id: `escrow_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      orderId: orderData.id,
-      buyerWallet: orderData.buyerWallet || 'current_buyer',
+      accountId: orderData.accountId, // Link to game account
+      buyerWallet: orderData.buyerWallet,
       sellerWallet: orderData.sellerWallet,
       accountTitle: orderData.title,
       gameName: orderData.gameName,
@@ -107,18 +111,29 @@ export const AdminProvider = ({ children }) => {
         {
           status: ESCROW_STATUS.PENDING_PAYMENT,
           timestamp: Date.now(),
-          note: 'Escrow transaction created'
+          note: 'Escrow transaction created - waiting for payment'
         }
       ],
       paymentHash: null,
       deliveryProof: null,
       buyerConfirmation: null,
-      disputeReason: null
+      disputeReason: null,
+      paymentDeadline: Date.now() + (15 * 60 * 1000), // 15 minutes
+      autoReleaseDate: null
     };
 
     const updatedTransactions = [...escrowTransactions, escrowTransaction];
     setEscrowTransactions(updatedTransactions);
     localStorage.setItem('escrowTransactions', JSON.stringify(updatedTransactions));
+    
+    // Update game account status
+    const gameAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
+    const updatedAccounts = gameAccounts.map(acc =>
+      acc.id === orderData.accountId
+        ? { ...acc, escrowId: escrowTransaction.id, isInEscrow: true }
+        : acc
+    );
+    localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
     
     return escrowTransaction;
   };
@@ -141,6 +156,12 @@ export const AdminProvider = ({ children }) => {
             }
           ]
         };
+        
+        // Set auto-release date when buyer confirms
+        if (newStatus === ESCROW_STATUS.BUYER_CONFIRMED) {
+          updatedTransaction.autoReleaseDate = Date.now() + (24 * 60 * 60 * 1000); // 24 hours
+        }
+        
         return updatedTransaction;
       }
       return transaction;
@@ -148,6 +169,31 @@ export const AdminProvider = ({ children }) => {
 
     setEscrowTransactions(updatedTransactions);
     localStorage.setItem('escrowTransactions', JSON.stringify(updatedTransactions));
+    
+    // Update game account status when completed or cancelled
+    if (newStatus === ESCROW_STATUS.COMPLETED || newStatus === ESCROW_STATUS.CANCELLED || newStatus === ESCROW_STATUS.REFUNDED) {
+      const transaction = updatedTransactions.find(t => t.id === escrowId);
+      if (transaction) {
+        const gameAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
+        const updatedAccounts = gameAccounts.map(acc => {
+          if (acc.id === transaction.accountId) {
+            if (newStatus === ESCROW_STATUS.COMPLETED) {
+              return { 
+                ...acc, 
+                isInEscrow: false, 
+                isSold: true, 
+                soldAt: Date.now(),
+                buyerWallet: transaction.buyerWallet 
+              };
+            } else {
+              return { ...acc, isInEscrow: false, escrowId: null };
+            }
+          }
+          return acc;
+        });
+        localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
+      }
+    }
     
     // Trigger storage event for other components
     window.dispatchEvent(new Event('storage'));
@@ -166,7 +212,10 @@ export const AdminProvider = ({ children }) => {
   // Seller delivers account
   const deliverAccount = (escrowId, deliveryData) => {
     return updateEscrowStatus(escrowId, ESCROW_STATUS.ACCOUNT_DELIVERED, {
-      deliveryProof: deliveryData,
+      deliveryProof: {
+        ...deliveryData,
+        deliveredAt: Date.now()
+      },
       note: 'Account details delivered to buyer'
     });
   };
@@ -174,16 +223,45 @@ export const AdminProvider = ({ children }) => {
   // Buyer confirms receipt
   const confirmReceipt = (escrowId, confirmationData) => {
     return updateEscrowStatus(escrowId, ESCROW_STATUS.BUYER_CONFIRMED, {
-      buyerConfirmation: confirmationData,
-      note: 'Buyer confirmed account receipt'
+      buyerConfirmation: {
+        ...confirmationData,
+        confirmedAt: Date.now()
+      },
+      note: 'Buyer confirmed account receipt - waiting for admin to release funds'
     });
   };
 
   // Admin releases funds to seller
   const releaseFunds = (escrowId) => {
+    const transaction = escrowTransactions.find(t => t.id === escrowId);
+    if (!transaction) return null;
+    
     return updateEscrowStatus(escrowId, ESCROW_STATUS.COMPLETED, {
       releasedAt: Date.now(),
-      note: 'Funds released to seller'
+      releasedTo: transaction.sellerWallet,
+      note: `Funds released to seller: ${transaction.sellerWallet}`
+    });
+  };
+
+  // Cancel escrow transaction
+  const cancelEscrow = (escrowId, reason) => {
+    return updateEscrowStatus(escrowId, ESCROW_STATUS.CANCELLED, {
+      cancelledAt: Date.now(),
+      cancellationReason: reason,
+      note: `Escrow cancelled: ${reason}`
+    });
+  };
+
+  // Refund to buyer
+  const refundToBuyer = (escrowId, reason) => {
+    const transaction = escrowTransactions.find(t => t.id === escrowId);
+    if (!transaction) return null;
+    
+    return updateEscrowStatus(escrowId, ESCROW_STATUS.REFUNDED, {
+      refundedAt: Date.now(),
+      refundedTo: transaction.buyerWallet,
+      refundReason: reason,
+      note: `Funds refunded to buyer: ${reason}`
     });
   };
 
@@ -195,7 +273,9 @@ export const AdminProvider = ({ children }) => {
       reason: disputeReason,
       disputedBy,
       createdAt: Date.now(),
-      status: 'open'
+      status: 'open',
+      evidence: [],
+      resolution: null
     };
 
     const updatedDisputes = [...pendingDisputes, dispute];
@@ -212,10 +292,16 @@ export const AdminProvider = ({ children }) => {
   };
 
   // Resolve dispute
-  const resolveDispute = (disputeId, resolution, refundToBuyer = false) => {
+  const resolveDispute = (disputeId, resolution, favorBuyer = false) => {
     const updatedDisputes = pendingDisputes.map(dispute => {
       if (dispute.id === disputeId) {
-        return { ...dispute, status: 'resolved', resolution, resolvedAt: Date.now() };
+        return { 
+          ...dispute, 
+          status: 'resolved', 
+          resolution, 
+          resolvedAt: Date.now(),
+          resolvedInFavorOf: favorBuyer ? 'buyer' : 'seller'
+        };
       }
       return dispute;
     });
@@ -225,18 +311,67 @@ export const AdminProvider = ({ children }) => {
 
     const dispute = updatedDisputes.find(d => d.id === disputeId);
     if (dispute) {
-      const newStatus = refundToBuyer ? ESCROW_STATUS.REFUNDED : ESCROW_STATUS.COMPLETED;
-      updateEscrowStatus(dispute.escrowId, newStatus, {
-        disputeResolution: resolution,
-        note: `Dispute resolved: ${resolution}. ${refundToBuyer ? 'Funds refunded to buyer' : 'Funds released to seller'}`
-      });
+      if (favorBuyer) {
+        refundToBuyer(dispute.escrowId, `Dispute resolved in favor of buyer: ${resolution}`);
+      } else {
+        releaseFunds(dispute.escrowId);
+      }
     }
   };
 
-  // Get escrow transaction by order ID
-  const getEscrowByOrderId = (orderId) => {
-    return escrowTransactions.find(transaction => transaction.orderId === orderId);
+  // Get escrow transaction by ID
+  const getEscrowById = (escrowId) => {
+    return escrowTransactions.find(transaction => transaction.id === escrowId);
   };
+
+  // Get escrow transactions by wallet
+  const getEscrowByWallet = (walletAddress, role = 'both') => {
+    if (role === 'buyer') {
+      return escrowTransactions.filter(t => t.buyerWallet === walletAddress);
+    } else if (role === 'seller') {
+      return escrowTransactions.filter(t => t.sellerWallet === walletAddress);
+    }
+    return escrowTransactions.filter(t => 
+      t.buyerWallet === walletAddress || t.sellerWallet === walletAddress
+    );
+  };
+
+  // Check for expired payments
+  const checkExpiredPayments = () => {
+    const now = Date.now();
+    const expired = escrowTransactions.filter(t => 
+      t.status === ESCROW_STATUS.PENDING_PAYMENT && 
+      t.paymentDeadline < now
+    );
+    
+    expired.forEach(transaction => {
+      cancelEscrow(transaction.id, 'Payment deadline expired');
+    });
+  };
+
+  // Check for auto-release
+  const checkAutoRelease = () => {
+    const now = Date.now();
+    const readyForRelease = escrowTransactions.filter(t => 
+      t.status === ESCROW_STATUS.BUYER_CONFIRMED && 
+      t.autoReleaseDate && 
+      t.autoReleaseDate < now
+    );
+    
+    readyForRelease.forEach(transaction => {
+      releaseFunds(transaction.id);
+    });
+  };
+
+  // Run periodic checks
+  useEffect(() => {
+    const interval = setInterval(() => {
+      checkExpiredPayments();
+      checkAutoRelease();
+    }, 60000); // Check every minute
+
+    return () => clearInterval(interval);
+  }, [escrowTransactions]);
 
   // Get admin statistics
   const getAdminStats = () => {
@@ -245,18 +380,25 @@ export const AdminProvider = ({ children }) => {
     const activeTransactions = escrowTransactions.filter(t => 
       [ESCROW_STATUS.PAYMENT_RECEIVED, ESCROW_STATUS.ACCOUNT_DELIVERED, ESCROW_STATUS.BUYER_CONFIRMED].includes(t.status)
     ).length;
+    const pendingPayments = escrowTransactions.filter(t => t.status === ESCROW_STATUS.PENDING_PAYMENT).length;
     const disputedTransactions = escrowTransactions.filter(t => t.status === ESCROW_STATUS.DISPUTED).length;
     
     const totalVolume = escrowTransactions
       .filter(t => t.status === ESCROW_STATUS.COMPLETED)
       .reduce((sum, t) => sum + parseFloat(t.priceETH || 0), 0);
 
+    const totalInEscrow = escrowTransactions
+      .filter(t => [ESCROW_STATUS.PAYMENT_RECEIVED, ESCROW_STATUS.ACCOUNT_DELIVERED, ESCROW_STATUS.BUYER_CONFIRMED].includes(t.status))
+      .reduce((sum, t) => sum + parseFloat(t.priceETH || 0), 0);
+
     return {
       totalTransactions,
       completedTransactions,
       activeTransactions,
+      pendingPayments,
       disputedTransactions,
       totalVolume,
+      totalInEscrow,
       pendingDisputes: pendingDisputes.length
     };
   };
@@ -272,9 +414,12 @@ export const AdminProvider = ({ children }) => {
     deliverAccount,
     confirmReceipt,
     releaseFunds,
+    cancelEscrow,
+    refundToBuyer,
     createDispute,
     resolveDispute,
-    getEscrowByOrderId,
+    getEscrowById,
+    getEscrowByWallet,
     getAdminStats,
     ESCROW_WALLET
   };

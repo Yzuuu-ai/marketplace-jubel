@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
 import { useAdmin } from '../context/AdminContext';
+
 // Data game untuk filter
 const gameList = [
   { id: 1, name: 'Mobile Legends' },
@@ -10,14 +11,6 @@ const gameList = [
   { id: 3, name: 'Free Fire' },
   { id: 4, name: 'Genshin Impact' },
 ];
-
-// Status constants yang konsisten dengan Pesanan.js
-const ORDER_STATUS = {
-  CART: 'keranjang',
-  ORDER: 'pesanan', 
-  FAILED: 'gagal',
-  COMPLETED: 'selesai'
-};
 
 // Generate unique ID for orders
 const generateOrderId = () => {
@@ -28,13 +21,14 @@ const generateOrderId = () => {
 const PaymentDetailModal = ({ account, onClose, onConfirm }) => {
   const [timeLeft, setTimeLeft] = useState(15 * 60); // 15 minutes in seconds
   const [selectedPayment, setSelectedPayment] = useState('');
+  const { ESCROW_WALLET } = useAdmin();
 
   const paymentMethods = [
     { 
       id: 'ethereum', 
       name: 'Ethereum (ETH)', 
       fee: 0.002, // Gas fee dalam ETH
-      address: '0x742d35Cc6635C0532925a3b8D1c9E5e7c5f47F1a',
+      address: ESCROW_WALLET, // Use escrow wallet
       network: 'Ethereum Mainnet',
       minConfirmations: 12
     }
@@ -80,7 +74,7 @@ const PaymentDetailModal = ({ account, onClose, onConfirm }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
       <div className="bg-white p-6 rounded-xl shadow-lg w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold">Detail Pembayaran</h2>
+          <h2 className="text-2xl font-bold">Detail Pembayaran - Escrow</h2>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -88,14 +82,31 @@ const PaymentDetailModal = ({ account, onClose, onConfirm }) => {
           </button>
         </div>
 
+        {/* Escrow Notice */}
+        <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg mb-4">
+          <div className="flex items-start">
+            <svg className="w-5 h-5 text-blue-600 mt-0.5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            </svg>
+            <div className="text-sm text-blue-800">
+              <p className="font-semibold mb-1">Pembayaran Aman dengan Escrow</p>
+              <p>Dana Anda akan disimpan di escrow wallet hingga Anda mengkonfirmasi penerimaan akun.</p>
+            </div>
+          </div>
+        </div>
+
         {/* Item Details */}
         <div className="bg-gray-50 p-4 rounded-lg mb-4">
           <h3 className="font-semibold mb-2">Detail Item</h3>
           <div className="flex items-center mb-3">
             <div className="w-12 h-12 bg-gray-200 rounded-lg mr-3 flex items-center justify-center">
-              <span className="text-gray-600 font-bold">
-                {account.gameName?.charAt(0) || 'G'}
-              </span>
+              {account.image ? (
+                <img src={account.image} alt={account.title} className="w-full h-full object-cover rounded-lg" />
+              ) : (
+                <span className="text-gray-600 font-bold">
+                  {account.gameName?.charAt(0) || 'G'}
+                </span>
+              )}
             </div>
             <div>
               <p className="font-medium">{account.title}</p>
@@ -130,7 +141,7 @@ const PaymentDetailModal = ({ account, onClose, onConfirm }) => {
                   </div>
                   <div className="text-sm text-gray-600 space-y-1">
                     <p><span className="font-medium">Network:</span> {method.network}</p>
-                    <p><span className="font-medium">Address:</span> 
+                    <p><span className="font-medium">Escrow Address:</span> 
                       <span className="font-mono text-xs break-all ml-1">{method.address}</span>
                     </p>
                     <p><span className="font-medium">Min Confirmations:</span> {method.minConfirmations}</p>
@@ -171,19 +182,32 @@ const PaymentDetailModal = ({ account, onClose, onConfirm }) => {
           </div>
         </div>
 
-        {/* Payment Instructions */}
-        {selectedPaymentMethod && (
-          <div className="bg-blue-50 p-4 rounded-lg mb-4">
-            <h3 className="font-semibold mb-2 text-blue-800">Instruksi Pembayaran</h3>
-            <div className="text-sm text-blue-700 space-y-2">
-              <p>1. Salin alamat wallet di atas</p>
-              <p>2. Transfer <strong>{totalPriceETH.toFixed(6)} ETH</strong> ke alamat tersebut</p>
-              <p>3. Pastikan menggunakan network <strong>{selectedPaymentMethod.network}</strong></p>
-              <p>4. Tunggu minimal {selectedPaymentMethod.minConfirmations} konfirmasi</p>
-              <p>5. Pesanan akan diproses setelah pembayaran terverifikasi</p>
+        {/* Escrow Process */}
+        <div className="bg-green-50 p-4 rounded-lg mb-4">
+          <h3 className="font-semibold mb-2 text-green-800">Proses Escrow</h3>
+          <div className="text-sm text-green-700 space-y-2">
+            <div className="flex items-start">
+              <span className="mr-2">1.</span>
+              <span>Transfer ETH ke alamat escrow di atas</span>
+            </div>
+            <div className="flex items-start">
+              <span className="mr-2">2.</span>
+              <span>Admin verifikasi pembayaran Anda</span>
+            </div>
+            <div className="flex items-start">
+              <span className="mr-2">3.</span>
+              <span>Penjual kirim detail akun</span>
+            </div>
+            <div className="flex items-start">
+              <span className="mr-2">4.</span>
+              <span>Anda verifikasi akun diterima</span>
+            </div>
+            <div className="flex items-start">
+              <span className="mr-2">5.</span>
+              <span>Dana dirilis ke penjual</span>
             </div>
           </div>
-        )}
+        </div>
 
         {/* Timer */}
         <div className="mb-6">
@@ -207,7 +231,7 @@ const PaymentDetailModal = ({ account, onClose, onConfirm }) => {
             Batal
           </button>
           <button 
-            onClick={() => onConfirm(selectedPaymentMethod, totalPriceETH)}
+            onClick={() => onConfirm(selectedPaymentMethod, totalPriceETH, account)}
             disabled={timeLeft === 0 || !selectedPayment}
             className={`flex-1 px-4 py-3 rounded-lg font-medium ${
               timeLeft > 0 && selectedPayment
@@ -215,7 +239,7 @@ const PaymentDetailModal = ({ account, onClose, onConfirm }) => {
                 : 'bg-gray-400 cursor-not-allowed text-white'
             }`}
           >
-            {timeLeft > 0 ? 'Konfirmasi Pembayaran' : 'Waktu Habis'}
+            {timeLeft > 0 ? 'Saya Sudah Transfer' : 'Waktu Habis'}
           </button>
         </div>
       </div>
@@ -223,8 +247,8 @@ const PaymentDetailModal = ({ account, onClose, onConfirm }) => {
   );
 };
 
-// Komponen Success Modal dengan navigasi manual
-const SuccessModal = ({ message, onClose, showNavigation = false, onNavigate }) => {
+// Komponen Success Modal
+const SuccessModal = ({ message, onClose, onNavigate }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
       <div className="bg-white p-6 rounded-xl shadow-lg w-full max-w-sm">
@@ -238,19 +262,17 @@ const SuccessModal = ({ message, onClose, showNavigation = false, onNavigate }) 
           <p className="text-gray-600 mb-4">{message}</p>
           <div className="space-y-2">
             <button
-              onClick={onClose}
-              className="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700"
+              onClick={onNavigate}
+              className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700"
             >
-              OK
+              Lihat Status Escrow
             </button>
-            {showNavigation && (
-              <button
-                onClick={onNavigate}
-                className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700"
-              >
-                Lihat Pesanan
-              </button>
-            )}
+            <button
+              onClick={onClose}
+              className="w-full bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400"
+            >
+              Tutup
+            </button>
           </div>
         </div>
       </div>
@@ -265,12 +287,12 @@ const Marketplace = () => {
   const gameIdParam = queryParams.get('game');
   const [filteredAccounts, setFilteredAccounts] = useState([]);
   const [selectedGame, setSelectedGame] = useState(gameIdParam ? parseInt(gameIdParam) : 0);
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, walletAddress } = useAuth();
+  const { createEscrowTransaction } = useAdmin();
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
-  const [showNavigationButton, setShowNavigationButton] = useState(false);
 
   // Dapatkan data akun dari localStorage
   const getGameAccounts = () => {
@@ -283,67 +305,19 @@ const Marketplace = () => {
     }
   };
 
-  // Fungsi untuk menambah ke wishlist/keranjang
-  const addToWishlist = (account) => {
-    if (!isAuthenticated) {
-      setSuccessMessage('Silakan login terlebih dahulu untuk menambah ke keranjang');
-      setShowSuccessModal(true);
-      return;
-    }
-
-    try {
-      // Cek apakah item sudah ada di keranjang
-      const existingOrders = JSON.parse(localStorage.getItem('orders') || '[]');
-      const itemExists = existingOrders.some(order => 
-        order.status === ORDER_STATUS.CART && 
-        order.title === account.title && 
-        order.sellerName === account.sellerName
-      );
-
-      if (itemExists) {
-        setSuccessMessage('Item sudah ada di keranjang!');
-        setShowSuccessModal(true);
-        return;
-      }
-
-      const wishlistItem = {
-        id: generateOrderId(),
-        title: account.title,
-        price: `${account.price}`, // Simpan harga asli untuk display
-        originalPrice: account.price, // Harga asli dalam IDR
-        image: account.image || `https://via.placeholder.com/150x150?text=${encodeURIComponent(account.title)}`,
-        description: account.description || `${gameList.find(g => g.id === account.gameId)?.name} account - Level: ${account.level || 'N/A'}, Rank: ${account.rank || 'N/A'}`,
-        status: ORDER_STATUS.CART, // Gunakan status yang konsisten
-        createdAt: Date.now(),
-        gameId: account.gameId,
-        gameName: gameList.find(g => g.id === account.gameId)?.name || '',
-        sellerName: account.sellerName,
-        sellerWallet: account.sellerWallet,
-        level: account.level,
-        rank: account.rank
-      };
-
-      const updatedOrders = [...existingOrders, wishlistItem];
-      localStorage.setItem('orders', JSON.stringify(updatedOrders));
-      
-      setSuccessMessage('Item berhasil ditambahkan ke keranjang!');
-      setShowSuccessModal(true);
-      
-    } catch (error) {
-      console.error('Error adding to cart:', error);
-      setSuccessMessage('Terjadi kesalahan saat menambah ke keranjang');
-      setShowSuccessModal(true);
-    }
-  };
-
   // Filter akun berdasarkan game yang dipilih
   useEffect(() => {
     const allAccounts = getGameAccounts();
+    
+    // Filter out sold accounts and accounts in escrow
+    const availableAccounts = allAccounts.filter(account => 
+      !account.isSold && !account.isInEscrow
+    );
 
     if (selectedGame === 0) {
-      setFilteredAccounts(allAccounts);
+      setFilteredAccounts(availableAccounts);
     } else {
-      const filtered = allAccounts.filter(account => account.gameId === selectedGame);
+      const filtered = availableAccounts.filter(account => account.gameId === selectedGame);
       setFilteredAccounts(filtered);
     }
   }, [selectedGame]);
@@ -368,57 +342,43 @@ const Marketplace = () => {
     setShowPaymentModal(true);
   };
 
-  const handleConfirmPayment = (paymentMethod, totalPriceETH) => {
+  const handleConfirmPayment = (paymentMethod, totalPriceETH, account) => {
     try {
-      const order = {
+      // Create order data
+      const orderData = {
         id: generateOrderId(),
-        title: selectedAccount.title,
-        price: `${totalPriceETH.toFixed(6)} ETH`, // Price untuk display
-        originalPrice: selectedAccount.price, // Harga asli dalam IDR
-        image: selectedAccount.image || `https://via.placeholder.com/150x150?text=${encodeURIComponent(selectedAccount.title)}`,
-        description: selectedAccount.description || `${gameList.find(g => g.id === selectedAccount.gameId)?.name} account - Level: ${selectedAccount.level || 'N/A'}, Rank: ${selectedAccount.rank || 'N/A'}`,
-        status: ORDER_STATUS.ORDER, // Status pesanan aktif
-        createdAt: Date.now(),
-        gameId: selectedAccount.gameId,
-        gameName: gameList.find(g => g.id === selectedAccount.gameId)?.name || '',
-        sellerName: selectedAccount.sellerName,
-        sellerWallet: selectedAccount.sellerWallet,
-        level: selectedAccount.level,
-        rank: selectedAccount.rank,
-        paymentMethod: paymentMethod?.name,
-        paymentId: paymentMethod?.id,
-        paymentAddress: paymentMethod?.address,
-        paymentNetwork: paymentMethod?.network,
+        accountId: account.id,
+        title: account.title,
+        gameName: gameList.find(g => g.id === account.gameId)?.name || '',
+        level: account.level,
+        rank: account.rank,
+        description: account.description,
+        image: account.image,
+        sellerWallet: account.sellerWallet,
+        sellerName: account.sellerName,
+        buyerWallet: walletAddress,
         totalPriceETH: totalPriceETH.toFixed(6),
         totalPriceIDR: (totalPriceETH * 50000000).toFixed(0),
-        gasFee: paymentMethod?.fee,
-        minConfirmations: paymentMethod?.minConfirmations
       };
 
-      const existingOrders = JSON.parse(localStorage.getItem('orders') || '[]');
-      
-      // Hapus item dari keranjang jika ada
-      const filteredOrders = existingOrders.filter(order => 
-        !(order.status === ORDER_STATUS.CART && 
-          order.title === selectedAccount.title && 
-          order.sellerName === selectedAccount.sellerName)
-      );
-      
-      const updatedOrders = [...filteredOrders, order];
-      localStorage.setItem('orders', JSON.stringify(updatedOrders));
+      // Create escrow transaction
+      const escrowTransaction = createEscrowTransaction(orderData);
       
       setShowPaymentModal(false);
       setSelectedAccount(null);
       
-      setSuccessMessage('Pesanan berhasil dibuat! Transfer ETH ke alamat yang tertera dan pesanan akan diproses.');
-      setShowNavigationButton(true);
+      setSuccessMessage(`Transaksi escrow berhasil dibuat! ID: ${escrowTransaction.id}. Transfer ${totalPriceETH.toFixed(6)} ETH ke wallet escrow dan tunggu konfirmasi admin.`);
       setShowSuccessModal(true);
       
     } catch (error) {
-      console.error('Error creating order:', error);
-      setSuccessMessage('Terjadi kesalahan saat membuat pesanan. Silakan coba lagi.');
+      console.error('Error creating escrow transaction:', error);
+      setSuccessMessage('Terjadi kesalahan saat membuat transaksi escrow. Silakan coba lagi.');
       setShowSuccessModal(true);
     }
+  };
+
+  const handleSuccessNavigate = () => {
+    navigate('/escrow');
   };
 
   return (
@@ -430,8 +390,20 @@ const Marketplace = () => {
         <div className="max-w-7xl mx-auto px-4 text-center">
           <h1 className="text-4xl md:text-5xl font-bold mb-4">Marketplace Akun Game</h1>
           <p className="text-xl max-w-2xl mx-auto">
-            Temukan akun game premium dengan harga terbaik dan transaksi aman
+            Temukan akun game premium dengan harga terbaik dan transaksi aman menggunakan sistem Escrow
           </p>
+        </div>
+      </section>
+
+      {/* Escrow Info Banner */}
+      <section className="bg-green-50 border-b border-green-200 py-4">
+        <div className="max-w-7xl mx-auto px-4">
+          <div className="flex items-center justify-center gap-3 text-green-800">
+            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            <span className="font-medium">Transaksi Aman dengan Escrow - Dana dijamin hingga akun diterima</span>
+          </div>
         </div>
       </section>
 
@@ -499,16 +471,6 @@ const Marketplace = () => {
                           {gameList.find(g => g.id === account.gameId)?.name}
                         </p>
                       </div>
-                      {/* Wishlist/Cart Button */}
-                      <button
-                        onClick={() => addToWishlist(account)}
-                        className="p-2 text-gray-400 hover:text-blue-500 transition-colors"
-                        title="Tambah ke Keranjang"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4m0 0L7 13m0 0l-2.5-5M7 13l-2.5 5M17 13v6a2 2 0 01-2 2H9a2 2 0 01-2-2v-6m8 0V9a2 2 0 00-2-2H9a2 2 0 00-2 2v4.01" />
-                        </svg>
-                      </button>
                     </div>
 
                     <div className="space-y-3 mt-4">
@@ -529,7 +491,6 @@ const Marketplace = () => {
                         <p className="text-xs text-gray-500">
                           <span className="font-medium">Penjual:</span> {account.sellerName}
                         </p>
-                        <p className="text-xs text-gray-500 truncate">{account.sellerWallet}</p>
                       </div>
                     </div>
 
@@ -583,16 +544,10 @@ const Marketplace = () => {
       {showSuccessModal && (
         <SuccessModal
           message={successMessage}
-          showNavigation={showNavigationButton}
           onClose={() => {
             setShowSuccessModal(false);
-            setShowNavigationButton(false);
           }}
-          onNavigate={() => {
-            setShowSuccessModal(false);
-            setShowNavigationButton(false);
-            navigate('/orders');
-          }}
+          onNavigate={handleSuccessNavigate}
         />
       )}
 

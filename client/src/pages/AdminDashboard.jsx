@@ -129,6 +129,7 @@ const EscrowTransactionCard = ({ transaction, onAction }) => {
   );
 };
 
+
 const ConfirmPaymentModal = ({ transaction, onClose, onConfirm }) => {
   const [paymentHash, setPaymentHash] = useState('');
 

@@ -265,6 +265,8 @@ const SellAccount = () => {
     };
   };
 
+  
+
   const stats = getAccountStats();
 
   return (
