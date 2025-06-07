@@ -26,7 +26,8 @@ const NETWORKS = {
   }
 };
 
-const ESCROW_WALLET = '0x742d35Cc6635C0532925a3b8D1c9E5e7c5f47F1a';
+// FIXED: Use the correct escrow wallet address
+const ESCROW_WALLET = '0xE14fcb0fDb1256445DC6ddd876225a8fAd9D211F';
 
 const BlockchainPaymentSystem = ({ order, onPaymentComplete, onCancel }) => {
   const { walletAddress } = useAuth();
@@ -450,6 +451,9 @@ const BlockchainPaymentSystem = ({ order, onPaymentComplete, onCancel }) => {
           <p className="text-green-800 font-medium">✅ Payment Completed</p>
           <p className="text-green-700 text-sm mt-1">
             Your escrow transaction has been created and the seller will be notified.
+          </p>
+          <p className="text-green-600 text-xs mt-2">
+            Escrow Wallet: {ESCROW_WALLET}
           </p>
         </div>
       )}

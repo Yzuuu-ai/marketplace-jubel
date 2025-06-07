@@ -39,8 +39,7 @@ export const ESCROW_STATUS_COLORS = {
 
 // UPDATED: Tambahkan wallet admin Anda
 const ADMIN_WALLETS = [
-  '0x742d35Cc6635C0532925a3b8D1c9E5e7c5f47F1a', // Default admin
-  '0xe14fcb0fdb1256445dc6ddd876225a8fad9d211f'  // YOUR ADMIN WALLET
+  '0xe14fcb0fdb1256445dc6ddd876225a8fad9d211f'
 ];
 
 // Escrow wallet (menggunakan admin wallet Anda)

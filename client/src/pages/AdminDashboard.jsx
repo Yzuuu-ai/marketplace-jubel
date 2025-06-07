@@ -1,7 +1,7 @@
-// src/pages/AdminDashboard.jsx - Fixed unused variables
+// src/pages/AdminDashboard.jsx - Fixed unused variables and imports
 import React, { useState, useEffect } from 'react';
 import Header from '../components/Header';
-import { useAdmin, ESCROW_STATUS, ESCROW_STATUS_LABELS, ESCROW_STATUS_COLORS } from '../context/AdminContext';
+import { useAdmin, ESCROW_STATUS_LABELS, ESCROW_STATUS_COLORS } from '../context/AdminContext';
 import { useAuth } from '../context/AuthContext';
 
 const formatDate = (timestamp) => {
@@ -19,10 +19,9 @@ const formatETH = (amount) => {
 };
 
 const EscrowTransactionCard = ({ transaction, onAction }) => {
-  const canConfirmPayment = transaction.status === ESCROW_STATUS.PENDING_PAYMENT;
-  const canReleaseFunds = transaction.status === ESCROW_STATUS.BUYER_CONFIRMED;
-  const isDisputed = transaction.status === ESCROW_STATUS.DISPUTED;
-  // Removed unused variable 'isCompleted'
+  const canConfirmPayment = transaction.status === 'pending_payment';
+  const canReleaseFunds = transaction.status === 'buyer_confirmed';
+  const isDisputed = transaction.status === 'disputed';
 
   return (
     <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-blue-500">
@@ -138,14 +137,11 @@ const EscrowTransactionCard = ({ transaction, onAction }) => {
   );
 };
 
-// ... (rest of the component remains the same)
-
 const AdminDashboard = () => {
   const { walletAddress } = useAuth();
   const { 
     isAdmin, 
     escrowTransactions, 
-    // Removed unused variable 'pendingDisputes'
     checkAdminStatus,
     confirmPaymentReceived,
     releaseFunds,
@@ -217,14 +213,14 @@ const AdminDashboard = () => {
     switch (status) {
       case 'active':
         return escrowTransactions.filter(t => 
-          [ESCROW_STATUS.PAYMENT_RECEIVED, ESCROW_STATUS.ACCOUNT_DELIVERED, ESCROW_STATUS.BUYER_CONFIRMED].includes(t.status)
+          ['payment_received', 'account_delivered', 'buyer_confirmed'].includes(t.status)
         );
       case 'disputed':
-        return escrowTransactions.filter(t => t.status === ESCROW_STATUS.DISPUTED);
+        return escrowTransactions.filter(t => t.status === 'disputed');
       case 'pending':
-        return escrowTransactions.filter(t => t.status === ESCROW_STATUS.PENDING_PAYMENT);
+        return escrowTransactions.filter(t => t.status === 'pending_payment');
       case 'completed':
-        return escrowTransactions.filter(t => t.status === ESCROW_STATUS.COMPLETED);
+        return escrowTransactions.filter(t => t.status === 'completed');
       default:
         return escrowTransactions;
     }
@@ -240,7 +236,7 @@ const AdminDashboard = () => {
             <h1 className="text-2xl font-bold text-red-800 mb-2">Akses Ditolak</h1>
             <p className="text-red-600">Anda tidak memiliki akses admin untuk melihat halaman ini.</p>
             <p className="text-red-500 text-sm mt-2">
-              Admin wallets: {['0x742d35Cc6635C0532925a3b8D1c9E5e7c5f47F1a'].join(', ')}
+              Admin wallets: 0xe14fcb0fdb1256445dc6ddd876225a8fad9d211f
             </p>
           </div>
         </div>
@@ -248,7 +244,6 @@ const AdminDashboard = () => {
     );
   }
 
-  // ... (rest of the component JSX remains exactly the same)
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
@@ -449,6 +444,9 @@ const AdminDashboard = () => {
                 <li>• Refund or release accordingly</li>
               </ul>
             </div>
+          </div>
+          <div className="mt-4 text-sm text-yellow-700">
+            <p><strong>Escrow Wallet:</strong> <span className="font-mono">0xe14fcb0fdb1256445dc6ddd876225a8fad9d211f</span></p>
           </div>
         </div>
       </div>
