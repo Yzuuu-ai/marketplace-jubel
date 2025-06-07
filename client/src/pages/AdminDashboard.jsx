@@ -1,4 +1,4 @@
-// src/pages/AdminDashboard.jsx
+// src/pages/AdminDashboard.jsx - Fixed unused variables
 import React, { useState, useEffect } from 'react';
 import Header from '../components/Header';
 import { useAdmin, ESCROW_STATUS, ESCROW_STATUS_LABELS, ESCROW_STATUS_COLORS } from '../context/AdminContext';
@@ -22,7 +22,7 @@ const EscrowTransactionCard = ({ transaction, onAction }) => {
   const canConfirmPayment = transaction.status === ESCROW_STATUS.PENDING_PAYMENT;
   const canReleaseFunds = transaction.status === ESCROW_STATUS.BUYER_CONFIRMED;
   const isDisputed = transaction.status === ESCROW_STATUS.DISPUTED;
-  const isCompleted = transaction.status === ESCROW_STATUS.COMPLETED;
+  // Removed unused variable 'isCompleted'
 
   return (
     <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-blue-500">
@@ -138,221 +138,14 @@ const EscrowTransactionCard = ({ transaction, onAction }) => {
   );
 };
 
-const ConfirmPaymentModal = ({ transaction, onClose, onConfirm }) => {
-  const [paymentHash, setPaymentHash] = useState('');
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (paymentHash.trim()) {
-      onConfirm(paymentHash.trim());
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">Konfirmasi Pembayaran</h2>
-        
-        <div className="mb-4">
-          <p className="text-sm text-gray-600 mb-2">Transaksi: {transaction.accountTitle}</p>
-          <p className="text-sm text-gray-600 mb-2">Jumlah: {transaction.priceETH} ETH</p>
-          <p className="text-sm text-gray-600">Pembeli: {transaction.buyerWallet}</p>
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Transaction Hash
-            </label>
-            <input
-              type="text"
-              value={paymentHash}
-              onChange={(e) => setPaymentHash(e.target.value)}
-              placeholder="0x..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-          </div>
-
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
-            >
-              Batal
-            </button>
-            <button
-              type="submit"
-              className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
-            >
-              Konfirmasi
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-const TransactionDetailModal = ({ transaction, onClose }) => {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
-        <div className="flex justify-between items-start mb-6">
-          <h2 className="text-2xl font-bold text-gray-800">Detail Escrow Transaction</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">
-            ✕
-          </button>
-        </div>
-
-        <div className="space-y-6">
-          {/* Basic Info */}
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="font-semibold text-gray-800 mb-3">Informasi Dasar</h3>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <p className="text-gray-600">ID Escrow:</p>
-                <p className="font-mono">{transaction.id}</p>
-              </div>
-              <div>
-                <p className="text-gray-600">Status:</p>
-                <span className={`px-2 py-1 rounded text-white text-xs ${ESCROW_STATUS_COLORS[transaction.status]}`}>
-                  {ESCROW_STATUS_LABELS[transaction.status]}
-                </span>
-              </div>
-              <div>
-                <p className="text-gray-600">Item:</p>
-                <p>{transaction.accountTitle}</p>
-              </div>
-              <div>
-                <p className="text-gray-600">Game:</p>
-                <p>{transaction.gameName}</p>
-              </div>
-              <div>
-                <p className="text-gray-600">Harga:</p>
-                <p className="font-semibold">{transaction.priceETH} ETH</p>
-              </div>
-              <div>
-                <p className="text-gray-600">Dibuat:</p>
-                <p>{formatDate(transaction.createdAt)}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Parties */}
-          <div className="bg-blue-50 p-4 rounded-lg">
-            <h3 className="font-semibold text-gray-800 mb-3">Pihak Terlibat</h3>
-            <div className="space-y-2 text-sm">
-              <div>
-                <p className="text-gray-600">Penjual:</p>
-                <p className="font-mono text-xs break-all">{transaction.sellerWallet}</p>
-              </div>
-              <div>
-                <p className="text-gray-600">Pembeli:</p>
-                <p className="font-mono text-xs break-all">{transaction.buyerWallet}</p>
-              </div>
-              <div>
-                <p className="text-gray-600">Escrow Wallet:</p>
-                <p className="font-mono text-xs break-all">{transaction.escrowWallet}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Account Details */}
-          <div className="bg-green-50 p-4 rounded-lg">
-            <h3 className="font-semibold text-gray-800 mb-3">Detail Akun</h3>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              {transaction.accountDetails.level && (
-                <div>
-                  <p className="text-gray-600">Level:</p>
-                  <p>{transaction.accountDetails.level}</p>
-                </div>
-              )}
-              {transaction.accountDetails.rank && (
-                <div>
-                  <p className="text-gray-600">Rank:</p>
-                  <p>{transaction.accountDetails.rank}</p>
-                </div>
-              )}
-              {transaction.accountDetails.description && (
-                <div className="col-span-2">
-                  <p className="text-gray-600">Deskripsi:</p>
-                  <p>{transaction.accountDetails.description}</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Timeline */}
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="font-semibold text-gray-800 mb-3">Timeline</h3>
-            <div className="space-y-3">
-              {transaction.timeline.map((event, index) => (
-                <div key={index} className="flex items-start gap-3">
-                  <div className="w-3 h-3 bg-blue-500 rounded-full mt-1"></div>
-                  <div className="flex-1 text-sm">
-                    <p className="font-medium">{ESCROW_STATUS_LABELS[event.status]}</p>
-                    <p className="text-gray-600">{event.note}</p>
-                    <p className="text-gray-500 text-xs">{formatDate(event.timestamp)}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Additional Info */}
-          {(transaction.paymentHash || transaction.deliveryProof || transaction.disputeReason) && (
-            <div className="space-y-4">
-              {transaction.paymentHash && (
-                <div className="bg-blue-50 p-4 rounded-lg">
-                  <h3 className="font-semibold text-blue-800 mb-2">Payment Hash</h3>
-                  <p className="font-mono text-xs break-all text-blue-600">{transaction.paymentHash}</p>
-                </div>
-              )}
-
-              {transaction.deliveryProof && (
-                <div className="bg-green-50 p-4 rounded-lg">
-                  <h3 className="font-semibold text-green-800 mb-2">Account Delivery</h3>
-                  <div className="text-sm text-green-700">
-                    <p><strong>Username:</strong> {transaction.deliveryProof.username}</p>
-                    <p><strong>Password:</strong> {transaction.deliveryProof.password}</p>
-                    {transaction.deliveryProof.notes && (
-                      <p><strong>Notes:</strong> {transaction.deliveryProof.notes}</p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {transaction.disputeReason && (
-                <div className="bg-red-50 p-4 rounded-lg">
-                  <h3 className="font-semibold text-red-800 mb-2">Dispute</h3>
-                  <p className="text-sm text-red-700">{transaction.disputeReason}</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="mt-6 flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-6 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
-          >
-            Tutup
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
+// ... (rest of the component remains the same)
 
 const AdminDashboard = () => {
   const { walletAddress } = useAuth();
   const { 
     isAdmin, 
     escrowTransactions, 
-    pendingDisputes,
+    // Removed unused variable 'pendingDisputes'
     checkAdminStatus,
     confirmPaymentReceived,
     releaseFunds,
@@ -455,6 +248,7 @@ const AdminDashboard = () => {
     );
   }
 
+  // ... (rest of the component JSX remains exactly the same)
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
@@ -680,6 +474,217 @@ const AdminDashboard = () => {
           }}
         />
       )}
+    </div>
+  );
+};
+
+// ConfirmPaymentModal component
+const ConfirmPaymentModal = ({ transaction, onClose, onConfirm }) => {
+  const [paymentHash, setPaymentHash] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (paymentHash.trim()) {
+      onConfirm(paymentHash.trim());
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+        <h2 className="text-xl font-bold text-gray-800 mb-4">Konfirmasi Pembayaran</h2>
+        
+        <div className="mb-4">
+          <p className="text-sm text-gray-600 mb-2">Transaksi: {transaction.accountTitle}</p>
+          <p className="text-sm text-gray-600 mb-2">Jumlah: {transaction.priceETH} ETH</p>
+          <p className="text-sm text-gray-600">Pembeli: {transaction.buyerWallet}</p>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Transaction Hash
+            </label>
+            <input
+              type="text"
+              value={paymentHash}
+              onChange={(e) => setPaymentHash(e.target.value)}
+              placeholder="0x..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
+            >
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+            >
+              Konfirmasi
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// TransactionDetailModal component
+const TransactionDetailModal = ({ transaction, onClose }) => {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+        <div className="flex justify-between items-start mb-6">
+          <h2 className="text-2xl font-bold text-gray-800">Detail Escrow Transaction</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">
+            ✕
+          </button>
+        </div>
+
+        <div className="space-y-6">
+          {/* Basic Info */}
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="font-semibold text-gray-800 mb-3">Informasi Dasar</h3>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-gray-600">ID Escrow:</p>
+                <p className="font-mono">{transaction.id}</p>
+              </div>
+              <div>
+                <p className="text-gray-600">Status:</p>
+                <span className={`px-2 py-1 rounded text-white text-xs ${ESCROW_STATUS_COLORS[transaction.status]}`}>
+                  {ESCROW_STATUS_LABELS[transaction.status]}
+                </span>
+              </div>
+              <div>
+                <p className="text-gray-600">Item:</p>
+                <p>{transaction.accountTitle}</p>
+              </div>
+              <div>
+                <p className="text-gray-600">Game:</p>
+                <p>{transaction.gameName}</p>
+              </div>
+              <div>
+                <p className="text-gray-600">Harga:</p>
+                <p className="font-semibold">{transaction.priceETH} ETH</p>
+              </div>
+              <div>
+                <p className="text-gray-600">Dibuat:</p>
+                <p>{formatDate(transaction.createdAt)}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Parties */}
+          <div className="bg-blue-50 p-4 rounded-lg">
+            <h3 className="font-semibold text-gray-800 mb-3">Pihak Terlibat</h3>
+            <div className="space-y-2 text-sm">
+              <div>
+                <p className="text-gray-600">Penjual:</p>
+                <p className="font-mono text-xs break-all">{transaction.sellerWallet}</p>
+              </div>
+              <div>
+                <p className="text-gray-600">Pembeli:</p>
+                <p className="font-mono text-xs break-all">{transaction.buyerWallet}</p>
+              </div>
+              <div>
+                <p className="text-gray-600">Escrow Wallet:</p>
+                <p className="font-mono text-xs break-all">{transaction.escrowWallet}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Account Details */}
+          <div className="bg-green-50 p-4 rounded-lg">
+            <h3 className="font-semibold text-gray-800 mb-3">Detail Akun</h3>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              {transaction.accountDetails.level && (
+                <div>
+                  <p className="text-gray-600">Level:</p>
+                  <p>{transaction.accountDetails.level}</p>
+                </div>
+              )}
+              {transaction.accountDetails.rank && (
+                <div>
+                  <p className="text-gray-600">Rank:</p>
+                  <p>{transaction.accountDetails.rank}</p>
+                </div>
+              )}
+              {transaction.accountDetails.description && (
+                <div className="col-span-2">
+                  <p className="text-gray-600">Deskripsi:</p>
+                  <p>{transaction.accountDetails.description}</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Timeline */}
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h3 className="font-semibold text-gray-800 mb-3">Timeline</h3>
+            <div className="space-y-3">
+              {transaction.timeline.map((event, index) => (
+                <div key={index} className="flex items-start gap-3">
+                  <div className="w-3 h-3 bg-blue-500 rounded-full mt-1"></div>
+                  <div className="flex-1 text-sm">
+                    <p className="font-medium">{ESCROW_STATUS_LABELS[event.status]}</p>
+                    <p className="text-gray-600">{event.note}</p>
+                    <p className="text-gray-500 text-xs">{formatDate(event.timestamp)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Additional Info */}
+          {(transaction.paymentHash || transaction.deliveryProof || transaction.disputeReason) && (
+            <div className="space-y-4">
+              {transaction.paymentHash && (
+                <div className="bg-blue-50 p-4 rounded-lg">
+                  <h3 className="font-semibold text-blue-800 mb-2">Payment Hash</h3>
+                  <p className="font-mono text-xs break-all text-blue-600">{transaction.paymentHash}</p>
+                </div>
+              )}
+
+              {transaction.deliveryProof && (
+                <div className="bg-green-50 p-4 rounded-lg">
+                  <h3 className="font-semibold text-green-800 mb-2">Account Delivery</h3>
+                  <div className="text-sm text-green-700">
+                    <p><strong>Username:</strong> {transaction.deliveryProof.username}</p>
+                    <p><strong>Password:</strong> {transaction.deliveryProof.password}</p>
+                    {transaction.deliveryProof.notes && (
+                      <p><strong>Notes:</strong> {transaction.deliveryProof.notes}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {transaction.disputeReason && (
+                <div className="bg-red-50 p-4 rounded-lg">
+                  <h3 className="font-semibold text-red-800 mb-2">Dispute</h3>
+                  <p className="text-sm text-red-700">{transaction.disputeReason}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-6 flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-6 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
+          >
+            Tutup
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

@@ -1,9 +1,10 @@
-// src/pages/SellAccount.jsx
+// src/pages/SellAccount.jsx - Fixed unused import
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
-import { useAdmin, ESCROW_STATUS, ESCROW_STATUS_LABELS, ESCROW_STATUS_COLORS } from '../context/AdminContext';
+import { useAdmin, ESCROW_STATUS_LABELS, ESCROW_STATUS_COLORS } from '../context/AdminContext';
+// Removed unused import 'ESCROW_STATUS'
 
 const SellAccount = () => {
   const { walletAddress, isAuthenticated } = useAuth();

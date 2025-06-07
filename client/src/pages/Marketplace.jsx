@@ -1,6 +1,8 @@
+// src/pages/Marketplace.jsx - Enhanced with Real Blockchain Payment
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
+import BlockchainPaymentSystem from '../components/BlockchainPaymentSystem';
 import { useAuth } from '../context/AuthContext';
 import { useAdmin } from '../context/AdminContext';
 
@@ -17,261 +19,49 @@ const generateOrderId = () => {
   return 'order_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 };
 
-// Komponen Modal Detail Pembayaran
-const PaymentDetailModal = ({ account, onClose, onConfirm }) => {
-  const [timeLeft, setTimeLeft] = useState(15 * 60); // 15 minutes in seconds
-  const [selectedPayment, setSelectedPayment] = useState('');
-  const { ESCROW_WALLET } = useAdmin();
-
-  const paymentMethods = [
-    { 
-      id: 'ethereum', 
-      name: 'Ethereum (ETH)', 
-      fee: 0.002, // Gas fee dalam ETH
-      address: ESCROW_WALLET, // Use escrow wallet
-      network: 'Ethereum Mainnet',
-      minConfirmations: 12
-    }
-  ];
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, []);
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const formatPrice = (price) => {
-    return parseFloat(price.replace(/[^\d.]/g, ''));
-  };
-
-  // Convert IDR to ETH (example rate: 1 ETH = 50,000,000 IDR)
-  const convertToETH = (idrPrice) => {
-    const ethRate = 50000000; // 1 ETH = 50 juta IDR
-    return (idrPrice / ethRate).toFixed(6);
-  };
-
-  const selectedPaymentMethod = paymentMethods.find(p => p.id === selectedPayment);
-  const basePriceIDR = formatPrice(account.price);
-  const basePriceETH = parseFloat(convertToETH(basePriceIDR));
-  const fee = selectedPaymentMethod ? selectedPaymentMethod.fee : 0;
-  const totalPriceETH = basePriceETH + fee;
-
+// Success Modal Component
+const SuccessModal = ({ message, onClose, onNavigate, transactionHash, explorerUrl }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white p-6 rounded-xl shadow-lg w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold">Detail Pembayaran - Escrow</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Escrow Notice */}
-        <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg mb-4">
-          <div className="flex items-start">
-            <svg className="w-5 h-5 text-blue-600 mt-0.5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-            </svg>
-            <div className="text-sm text-blue-800">
-              <p className="font-semibold mb-1">Pembayaran Aman dengan Escrow</p>
-              <p>Dana Anda akan disimpan di escrow wallet hingga Anda mengkonfirmasi penerimaan akun.</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Item Details */}
-        <div className="bg-gray-50 p-4 rounded-lg mb-4">
-          <h3 className="font-semibold mb-2">Detail Item</h3>
-          <div className="flex items-center mb-3">
-            <div className="w-12 h-12 bg-gray-200 rounded-lg mr-3 flex items-center justify-center">
-              {account.image ? (
-                <img src={account.image} alt={account.title} className="w-full h-full object-cover rounded-lg" />
-              ) : (
-                <span className="text-gray-600 font-bold">
-                  {account.gameName?.charAt(0) || 'G'}
-                </span>
-              )}
-            </div>
-            <div>
-              <p className="font-medium">{account.title}</p>
-              <p className="text-sm text-gray-600">{account.gameName}</p>
-            </div>
-          </div>
-          {account.level && <p className="text-sm"><span className="font-medium">Level:</span> {account.level}</p>}
-          {account.rank && <p className="text-sm"><span className="font-medium">Rank:</span> {account.rank}</p>}
-          <p className="text-sm mt-2"><span className="font-medium">Penjual:</span> {account.sellerName}</p>
-        </div>
-
-        {/* Payment Method Selection */}
-        <div className="mb-4">
-          <h3 className="font-semibold mb-3">Metode Pembayaran</h3>
-          <div className="space-y-2">
-            {paymentMethods.map((method) => (
-              <label key={method.id} className="flex items-start p-4 border rounded-lg cursor-pointer hover:bg-gray-50">
-                <input
-                  type="radio"
-                  name="payment"
-                  value={method.id}
-                  checked={selectedPayment === method.id}
-                  onChange={(e) => setSelectedPayment(e.target.value)}
-                  className="mr-3 mt-1"
-                />
-                <div className="flex-1">
-                  <div className="flex justify-between items-start mb-2">
-                    <span className="font-medium">{method.name}</span>
-                    <span className="text-sm text-gray-500">
-                      Gas Fee: {method.fee} ETH
-                    </span>
-                  </div>
-                  <div className="text-sm text-gray-600 space-y-1">
-                    <p><span className="font-medium">Network:</span> {method.network}</p>
-                    <p><span className="font-medium">Escrow Address:</span> 
-                      <span className="font-mono text-xs break-all ml-1">{method.address}</span>
-                    </p>
-                    <p><span className="font-medium">Min Confirmations:</span> {method.minConfirmations}</p>
-                  </div>
-                </div>
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Price Breakdown */}
-        <div className="bg-gray-50 p-4 rounded-lg mb-4">
-          <h3 className="font-semibold mb-3">Rincian Harga</h3>
-          <div className="space-y-2">
-            <div className="flex justify-between">
-              <span>Harga Item</span>
-              <div className="text-right">
-                <div>Rp {basePriceIDR.toLocaleString('id-ID')}</div>
-                <div className="text-sm text-gray-500">{basePriceETH} ETH</div>
-              </div>
-            </div>
-            {selectedPaymentMethod && (
-              <div className="flex justify-between">
-                <span>Gas Fee ({selectedPaymentMethod.name})</span>
-                <span>{fee} ETH</span>
-              </div>
-            )}
-            <hr className="my-2" />
-            <div className="flex justify-between font-bold text-lg">
-              <span>Total</span>
-              <div className="text-right">
-                <div className="text-blue-600">{totalPriceETH.toFixed(6)} ETH</div>
-                <div className="text-sm text-gray-500">
-                  ≈ Rp {(totalPriceETH * 50000000).toLocaleString('id-ID')}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Escrow Process */}
-        <div className="bg-green-50 p-4 rounded-lg mb-4">
-          <h3 className="font-semibold mb-2 text-green-800">Proses Escrow</h3>
-          <div className="text-sm text-green-700 space-y-2">
-            <div className="flex items-start">
-              <span className="mr-2">1.</span>
-              <span>Transfer ETH ke alamat escrow di atas</span>
-            </div>
-            <div className="flex items-start">
-              <span className="mr-2">2.</span>
-              <span>Admin verifikasi pembayaran Anda</span>
-            </div>
-            <div className="flex items-start">
-              <span className="mr-2">3.</span>
-              <span>Penjual kirim detail akun</span>
-            </div>
-            <div className="flex items-start">
-              <span className="mr-2">4.</span>
-              <span>Anda verifikasi akun diterima</span>
-            </div>
-            <div className="flex items-start">
-              <span className="mr-2">5.</span>
-              <span>Dana dirilis ke penjual</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Timer */}
-        <div className="mb-6">
-          <p className="text-red-600 font-medium text-center">
-            Selesaikan pembayaran dalam: {formatTime(timeLeft)}
-          </p>
-          <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-            <div 
-              className="bg-red-600 h-2 rounded-full transition-all duration-1000"
-              style={{ width: `${(timeLeft / (15 * 60)) * 100}%` }}
-            ></div>
-          </div>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex gap-3">
-          <button 
-            onClick={onClose} 
-            className="flex-1 px-4 py-3 rounded-lg bg-gray-300 hover:bg-gray-400 font-medium"
-          >
-            Batal
-          </button>
-          <button 
-            onClick={() => onConfirm(selectedPaymentMethod, totalPriceETH, account)}
-            disabled={timeLeft === 0 || !selectedPayment}
-            className={`flex-1 px-4 py-3 rounded-lg font-medium ${
-              timeLeft > 0 && selectedPayment
-                ? 'bg-green-600 hover:bg-green-700 text-white' 
-                : 'bg-gray-400 cursor-not-allowed text-white'
-            }`}
-          >
-            {timeLeft > 0 ? 'Saya Sudah Transfer' : 'Waktu Habis'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Komponen Success Modal
-const SuccessModal = ({ message, onClose, onNavigate }) => {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white p-6 rounded-xl shadow-lg w-full max-w-sm">
+      <div className="bg-white p-6 rounded-xl shadow-lg w-full max-w-md">
         <div className="text-center">
           <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold mb-2">Berhasil!</h3>
+          <h3 className="text-lg font-semibold mb-2">Payment Successful!</h3>
           <p className="text-gray-600 mb-4">{message}</p>
+          
+          {transactionHash && (
+            <div className="bg-gray-50 rounded-lg p-3 mb-4">
+              <p className="text-sm font-medium text-gray-700 mb-1">Transaction Hash:</p>
+              <p className="text-xs font-mono text-gray-600 break-all mb-2">{transactionHash}</p>
+              {explorerUrl && (
+                <a
+                  href={explorerUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:text-blue-800 text-sm underline"
+                >
+                  View on Blockchain Explorer
+                </a>
+              )}
+            </div>
+          )}
+          
           <div className="space-y-2">
             <button
               onClick={onNavigate}
               className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700"
             >
-              Lihat Status Escrow
+              View Escrow Status
             </button>
             <button
               onClick={onClose}
               className="w-full bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400"
             >
-              Tutup
+              Continue Shopping
             </button>
           </div>
         </div>
@@ -293,6 +83,7 @@ const Marketplace = () => {
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [paymentResult, setPaymentResult] = useState(null);
 
   // Dapatkan data akun dari localStorage
   const getGameAccounts = () => {
@@ -338,47 +129,79 @@ const Marketplace = () => {
       setShowSuccessModal(true);
       return;
     }
-    setSelectedAccount(account);
+    
+    // Prepare order data for blockchain payment
+    const orderData = {
+      id: generateOrderId(),
+      accountId: account.id,
+      title: account.title,
+      gameName: gameList.find(g => g.id === account.gameId)?.name || '',
+      level: account.level,
+      rank: account.rank,
+      description: account.description,
+      image: account.image,
+      sellerWallet: account.sellerWallet,
+      sellerName: account.sellerName,
+      buyerWallet: walletAddress,
+      priceETH: parseFloat(account.price.replace(' ETH', '')),
+      totalPriceETH: parseFloat(account.price.replace(' ETH', '')), // Could add fees here
+      priceIDR: (parseFloat(account.price.replace(' ETH', '')) * 50000000).toFixed(0), // ETH to IDR conversion
+    };
+    
+    setSelectedAccount(orderData);
     setShowPaymentModal(true);
   };
 
-  const handleConfirmPayment = (paymentMethod, totalPriceETH, account) => {
+  const handlePaymentComplete = (paymentData) => {
     try {
-      // Create order data
-      const orderData = {
-        id: generateOrderId(),
-        accountId: account.id,
-        title: account.title,
-        gameName: gameList.find(g => g.id === account.gameId)?.name || '',
-        level: account.level,
-        rank: account.rank,
-        description: account.description,
-        image: account.image,
-        sellerWallet: account.sellerWallet,
-        sellerName: account.sellerName,
-        buyerWallet: walletAddress,
-        totalPriceETH: totalPriceETH.toFixed(6),
-        totalPriceIDR: (totalPriceETH * 50000000).toFixed(0),
+      if (!selectedAccount) return;
+
+      // Create escrow transaction with blockchain payment data
+      const escrowData = {
+        ...selectedAccount,
+        paymentHash: paymentData.transactionHash,
+        network: paymentData.network,
+        paymentStatus: paymentData.status,
+        paidAmount: paymentData.amount
       };
 
-      // Create escrow transaction
-      const escrowTransaction = createEscrowTransaction(orderData);
+      const escrowTransaction = createEscrowTransaction(escrowData);
       
       setShowPaymentModal(false);
-      setSelectedAccount(null);
+      setPaymentResult(paymentData);
       
-      setSuccessMessage(`Transaksi escrow berhasil dibuat! ID: ${escrowTransaction.id}. Transfer ${totalPriceETH.toFixed(6)} ETH ke wallet escrow dan tunggu konfirmasi admin.`);
+      setSuccessMessage(`
+        Pembayaran blockchain berhasil! 
+        Escrow ID: ${escrowTransaction.id}
+        Transaction Hash: ${paymentData.transactionHash}
+        Seller akan segera diberitahu untuk mengirim detail akun.
+      `);
       setShowSuccessModal(true);
       
     } catch (error) {
       console.error('Error creating escrow transaction:', error);
-      setSuccessMessage('Terjadi kesalahan saat membuat transaksi escrow. Silakan coba lagi.');
+      setSuccessMessage('Pembayaran berhasil tapi terjadi kesalahan dalam membuat escrow. Hubungi admin.');
       setShowSuccessModal(true);
     }
   };
 
+  const handlePaymentCancel = () => {
+    setShowPaymentModal(false);
+    setSelectedAccount(null);
+  };
+
   const handleSuccessNavigate = () => {
     navigate('/escrow');
+  };
+
+  // Convert price display to show both ETH and fiat
+  const formatPriceDisplay = (ethPrice) => {
+    const eth = parseFloat(ethPrice.replace(' ETH', ''));
+    const idr = (eth * 50000000).toLocaleString('id-ID');
+    return {
+      eth: `${eth} ETH`,
+      idr: `≈ Rp ${idr}`
+    };
   };
 
   return (
@@ -390,19 +213,48 @@ const Marketplace = () => {
         <div className="max-w-7xl mx-auto px-4 text-center">
           <h1 className="text-4xl md:text-5xl font-bold mb-4">Marketplace Akun Game</h1>
           <p className="text-xl max-w-2xl mx-auto">
-            Temukan akun game premium dengan harga terbaik dan transaksi aman menggunakan sistem Escrow
+            Temukan akun game premium dengan transaksi aman menggunakan <strong>Blockchain Ethereum</strong>
           </p>
         </div>
       </section>
 
-      {/* Escrow Info Banner */}
-      <section className="bg-green-50 border-b border-green-200 py-4">
+      {/* Blockchain Info Banner */}
+      <section className="bg-gradient-to-r from-green-50 to-blue-50 border-b border-green-200 py-6">
         <div className="max-w-7xl mx-auto px-4">
-          <div className="flex items-center justify-center gap-3 text-green-800">
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-            </svg>
-            <span className="font-medium">Transaksi Aman dengan Escrow - Dana dijamin hingga akun diterima</span>
+          <div className="flex flex-col md:flex-row items-center justify-center gap-6 text-center md:text-left">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center">
+                <span className="text-white font-bold text-xl">⟠</span>
+              </div>
+              <div>
+                <h3 className="font-bold text-gray-800">Real Blockchain Payment</h3>
+                <p className="text-gray-600 text-sm">Pembayaran ETH langsung ke smart contract escrow</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-green-600 rounded-full flex items-center justify-center">
+                <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-bold text-gray-800">Multi-Network Support</h3>
+                <p className="text-gray-600 text-sm">Ethereum, Sepolia Testnet, Polygon</p>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-purple-600 rounded-full flex items-center justify-center">
+                <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-bold text-gray-800">Verified on Explorer</h3>
+                <p className="text-gray-600 text-sm">Semua transaksi dapat diverifikasi di Etherscan</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -420,8 +272,8 @@ const Marketplace = () => {
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => handleGameFilter(0)}
-                className={`px-4 py-2 rounded-lg ${
-                  selectedGame === 0 ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                className={`px-4 py-2 rounded-lg transition-all ${
+                  selectedGame === 0 ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                 }`}
               >
                 Semua Game
@@ -430,9 +282,9 @@ const Marketplace = () => {
                 <button
                   key={game.id}
                   onClick={() => handleGameFilter(game.id)}
-                  className={`px-4 py-2 rounded-lg ${
+                  className={`px-4 py-2 rounded-lg transition-all ${
                     selectedGame === game.id
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-blue-600 text-white shadow-lg'
                       : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                   }`}
                 >
@@ -445,98 +297,137 @@ const Marketplace = () => {
           {/* Daftar Akun */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredAccounts.length > 0 ? (
-              filteredAccounts.map((account) => (
-                <div
-                  key={account.id}
-                  className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-lg transition-shadow"
-                >
-                  <div className="p-6">
-                    <div className="flex items-center mb-4">
-                      <div className="w-16 h-16 bg-gray-200 border-2 border-dashed rounded-xl mr-4 flex items-center justify-center">
-                        {account.image ? (
-                          <img
-                            src={account.image}
-                            alt={account.title}
-                            className="w-full h-full object-cover rounded-xl"
-                          />
-                        ) : (
-                          <span className="text-gray-500 text-lg">
-                            {gameList.find(g => g.id === account.gameId)?.name.charAt(0) || 'G'}
-                          </span>
+              filteredAccounts.map((account) => {
+                const priceDisplay = formatPriceDisplay(account.price);
+                return (
+                  <div
+                    key={account.id}
+                    className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-xl transition-all transform hover:-translate-y-1"
+                  >
+                    <div className="p-6">
+                      <div className="flex items-center mb-4">
+                        <div className="w-16 h-16 bg-gray-200 border-2 border-dashed rounded-xl mr-4 flex items-center justify-center relative">
+                          {account.image ? (
+                            <img
+                              src={account.image}
+                              alt={account.title}
+                              className="w-full h-full object-cover rounded-xl"
+                            />
+                          ) : (
+                            <span className="text-gray-500 text-lg">
+                              {gameList.find(g => g.id === account.gameId)?.name.charAt(0) || 'G'}
+                            </span>
+                          )}
+                          {/* Blockchain Badge */}
+                          <div className="absolute -top-1 -right-1 w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center">
+                            <span className="text-white text-xs font-bold">⟠</span>
+                          </div>
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-gray-900">{account.title}</h3>
+                          <p className="text-sm text-gray-500">
+                            {gameList.find(g => g.id === account.gameId)?.name}
+                          </p>
+                          <div className="mt-1">
+                            <p className="text-lg font-bold text-blue-600">{priceDisplay.eth}</p>
+                            <p className="text-sm text-gray-500">{priceDisplay.idr}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 mb-4">
+                        {account.level && (
+                          <p className="text-sm">
+                            <span className="font-medium text-gray-700">Level:</span> 
+                            <span className="ml-1 text-blue-600 font-semibold">{account.level}</span>
+                          </p>
+                        )}
+                        {account.rank && (
+                          <p className="text-sm">
+                            <span className="font-medium text-gray-700">Rank:</span> 
+                            <span className="ml-1 text-purple-600 font-semibold">{account.rank}</span>
+                          </p>
+                        )}
+                        {account.description && (
+                          <p className="text-sm text-gray-600 line-clamp-2">{account.description}</p>
                         )}
                       </div>
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-gray-900">{account.title}</h3>
-                        <p className="text-sm text-gray-500">
-                          {gameList.find(g => g.id === account.gameId)?.name}
-                        </p>
-                      </div>
-                    </div>
 
-                    <div className="space-y-3 mt-4">
-                      {account.level && (
-                        <p className="text-sm">
-                          <span className="font-medium">Level:</span> {account.level}
-                        </p>
-                      )}
-                      {account.rank && (
-                        <p className="text-sm">
-                          <span className="font-medium">Rank:</span> {account.rank}
-                        </p>
-                      )}
-                      {account.description && (
-                        <p className="text-sm text-gray-600 mt-2">{account.description}</p>
-                      )}
-                      <div className="mt-3 pt-3 border-t border-gray-100">
-                        <p className="text-xs text-gray-500">
-                          <span className="font-medium">Penjual:</span> {account.sellerName}
-                        </p>
+                      {/* Seller Info */}
+                      <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+                        <p className="text-xs text-gray-500 mb-1">Seller</p>
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
+                            <span className="text-white text-xs font-bold">
+                              {account.sellerName?.charAt(0) || 'S'}
+                            </span>
+                          </div>
+                          <span className="text-sm font-medium text-gray-700">{account.sellerName}</span>
+                          <div className="flex items-center text-yellow-500">
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                            </svg>
+                            <span className="text-xs ml-1 text-gray-600">4.8</span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className="flex justify-between items-center mt-6">
-                      <span className="text-xl font-bold text-blue-600">{account.price}</span>
-                      <button
-                        onClick={() => handleBuyClick(account)}
-                        className={`px-4 py-2 rounded-lg transition-colors ${
-                          isAuthenticated
-                            ? 'bg-green-600 text-white hover:bg-green-700'
-                            : 'bg-gray-400 text-white cursor-not-allowed'
-                        }`}
-                      >
-                        {isAuthenticated ? 'Beli Sekarang' : 'Login untuk Beli'}
-                      </button>
+                      {/* Payment Methods */}
+                      <div className="mb-4">
+                        <p className="text-xs text-gray-500 mb-2">Payment Options</p>
+                        <div className="flex flex-wrap gap-1">
+                          <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">⟠ ETH</span>
+                          <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">🔷 Polygon</span>
+                          <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded-full">🧪 Testnet</span>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <div className="text-xs text-gray-500">
+                          <span>🔒 Escrow Protected</span>
+                        </div>
+                        <button
+                          onClick={() => handleBuyClick(account)}
+                          className={`px-6 py-3 rounded-lg transition-all font-semibold ${
+                            isAuthenticated
+                              ? 'bg-gradient-to-r from-green-600 to-blue-600 text-white hover:from-green-700 hover:to-blue-700 shadow-lg hover:shadow-xl'
+                              : 'bg-gray-400 text-white cursor-not-allowed'
+                          }`}
+                        >
+                          {isAuthenticated ? '⟠ Pay with ETH' : 'Login to Buy'}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             ) : (
               <div className="col-span-3 text-center py-12">
-                <p className="text-gray-500 text-lg">Tidak ada akun yang tersedia untuk game ini</p>
-                <button
-                  onClick={() => handleGameFilter(0)}
-                  className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-                >
-                  Lihat Semua Akun
-                </button>
+                <div className="bg-white rounded-2xl shadow-lg p-12 max-w-md mx-auto">
+                  <div className="text-6xl mb-6">🎮</div>
+                  <h3 className="text-xl font-bold text-gray-800 mb-2">No Accounts Available</h3>
+                  <p className="text-gray-500 mb-6">
+                    Tidak ada akun yang tersedia untuk game ini saat ini.
+                  </p>
+                  <button
+                    onClick={() => handleGameFilter(0)}
+                    className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
+                  >
+                    View All Games
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </div>
       </section>
 
-      {/* Payment Modal */}
+      {/* Blockchain Payment Modal */}
       {showPaymentModal && selectedAccount && (
-        <PaymentDetailModal
-          account={{
-            ...selectedAccount,
-            gameName: gameList.find(g => g.id === selectedAccount.gameId)?.name || ''
-          }}
-          onClose={() => {
-            setShowPaymentModal(false);
-            setSelectedAccount(null);
-          }}
-          onConfirm={handleConfirmPayment}
+        <BlockchainPaymentSystem
+          order={selectedAccount}
+          onPaymentComplete={handlePaymentComplete}
+          onCancel={handlePaymentCancel}
         />
       )}
 
@@ -544,16 +435,124 @@ const Marketplace = () => {
       {showSuccessModal && (
         <SuccessModal
           message={successMessage}
+          transactionHash={paymentResult?.transactionHash}
+          explorerUrl={paymentResult?.transactionHash ? `https://etherscan.io/tx/${paymentResult.transactionHash}` : null}
           onClose={() => {
             setShowSuccessModal(false);
+            setPaymentResult(null);
           }}
           onNavigate={handleSuccessNavigate}
         />
       )}
 
+      {/* Info Section */}
+      <section className="py-16 bg-gray-100">
+        <div className="max-w-7xl mx-auto px-4">
+          <div className="text-center mb-12">
+            <h3 className="text-3xl font-bold text-gray-900 mb-4">Blockchain Payment Advantage</h3>
+            <p className="text-gray-600 max-w-2xl mx-auto">
+              Transaksi langsung menggunakan blockchain untuk keamanan dan transparansi maksimal
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-8">
+            {/* Feature 1 */}
+            <div className="bg-white rounded-xl shadow-lg p-6 text-center">
+              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <span className="text-3xl">⟠</span>
+              </div>
+              <h4 className="text-xl font-semibold text-gray-900 mb-2">Real ETH Payment</h4>
+              <p className="text-gray-600">
+                Pembayaran menggunakan Ethereum asli, dapat diverifikasi di blockchain explorer
+              </p>
+              <div className="mt-4 text-sm text-blue-600">
+                <p>✓ MetaMask Integration</p>
+                <p>✓ Multi-Network Support</p>
+                <p>✓ Gas Fee Optimization</p>
+              </div>
+            </div>
+
+            {/* Feature 2 */}
+            <div className="bg-white rounded-xl shadow-lg p-6 text-center">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <h4 className="text-xl font-semibold text-gray-900 mb-2">Smart Contract Escrow</h4>
+              <p className="text-gray-600">
+                Dana ditahan di smart contract hingga transaksi dikonfirmasi kedua belah pihak
+              </p>
+              <div className="mt-4 text-sm text-green-600">
+                <p>✓ Automatic Release</p>
+                <p>✓ Dispute Resolution</p>
+                <p>✓ Zero Counterparty Risk</p>
+              </div>
+            </div>
+
+            {/* Feature 3 */}
+            <div className="bg-white rounded-xl shadow-lg p-6 text-center">
+              <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h4 className="text-xl font-semibold text-gray-900 mb-2">Full Transparency</h4>
+              <p className="text-gray-600">
+                Semua transaksi tercatat di blockchain dan dapat diverifikasi siapa saja
+              </p>
+              <div className="mt-4 text-sm text-purple-600">
+                <p>✓ Transaction Hash</p>
+                <p>✓ Block Confirmation</p>
+                <p>✓ Explorer Verification</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Network Support */}
+          <div className="mt-12 bg-white rounded-xl shadow-lg p-8">
+            <h4 className="text-xl font-bold text-gray-800 mb-6 text-center">Supported Networks</h4>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="flex items-center gap-4 p-4 border rounded-lg">
+                <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center">
+                  <span className="text-white font-bold">⟠</span>
+                </div>
+                <div>
+                  <h5 className="font-semibold text-gray-800">Ethereum Mainnet</h5>
+                  <p className="text-sm text-gray-600">Production network dengan ETH asli</p>
+                  <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded-full">LIVE</span>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-4 p-4 border rounded-lg">
+                <div className="w-12 h-12 bg-blue-400 rounded-full flex items-center justify-center">
+                  <span className="text-white font-bold">🧪</span>
+                </div>
+                <div>
+                  <h5 className="font-semibold text-gray-800">Sepolia Testnet</h5>
+                  <p className="text-sm text-gray-600">Testing network dengan ETH gratis</p>
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">TEST</span>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-4 p-4 border rounded-lg">
+                <div className="w-12 h-12 bg-purple-600 rounded-full flex items-center justify-center">
+                  <span className="text-white font-bold">🔷</span>
+                </div>
+                <div>
+                  <h5 className="font-semibold text-gray-800">Polygon</h5>
+                  <p className="text-sm text-gray-600">Layer 2 dengan biaya rendah</p>
+                  <span className="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded-full">L2</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <footer className="bg-gray-900 text-white mt-12">
         <div className="max-w-7xl mx-auto px-4 py-12 text-center border-t border-gray-800 text-gray-400">
-          <p>&copy; 2025 GameMarket. All rights reserved.</p>
+          <p>&copy; 2025 GameMarket. All rights reserved. | Powered by Ethereum Blockchain</p>
         </div>
       </footer>
     </div>
