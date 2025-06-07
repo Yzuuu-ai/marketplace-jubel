@@ -5,7 +5,7 @@ import Home from './pages/Home';
 import Login from './pages/Login';
 import Marketplace from './pages/Marketplace';
 import SellAccount from './pages/SellAccount';
-import Pesanan from './pages/Pesanan';
+
 import Profile from './pages/Profile';
 import RiwayatTransaksi from './pages/RiwayatTransaksi';
 import AdminDashboard from './pages/AdminDashboard';
@@ -19,7 +19,6 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/marketplace" element={<Marketplace />} />
         <Route path="/sell" element={<SellAccount />} />
-        <Route path="/pesanan" element={<Pesanan />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/riwayat-transaksi" element={<RiwayatTransaksi />} />
         <Route path="/admin" element={<AdminDashboard />} />

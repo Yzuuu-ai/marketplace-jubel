@@ -14,6 +14,10 @@ const formatDate = (timestamp) => {
   });
 };
 
+const formatETH = (amount) => {
+  return parseFloat(amount).toFixed(6);
+};
+
 const EscrowTransactionCard = ({ transaction, onAction }) => {
   const canConfirmPayment = transaction.status === ESCROW_STATUS.PENDING_PAYMENT;
   const canReleaseFunds = transaction.status === ESCROW_STATUS.BUYER_CONFIRMED;
@@ -67,10 +71,7 @@ const EscrowTransactionCard = ({ transaction, onAction }) => {
           <p className="text-sm font-medium text-green-800">Account Delivered:</p>
           <div className="text-xs text-green-600">
             <p><strong>Username:</strong> {transaction.deliveryProof.username}</p>
-            <p><strong>Password:</strong> {transaction.deliveryProof.password}</p>
-            {transaction.deliveryProof.notes && (
-              <p><strong>Notes:</strong> {transaction.deliveryProof.notes}</p>
-            )}
+            <p><strong>Delivered at:</strong> {formatDate(transaction.deliveryProof.deliveredAt)}</p>
           </div>
         </div>
       )}
@@ -84,12 +85,20 @@ const EscrowTransactionCard = ({ transaction, onAction }) => {
 
       <div className="flex gap-2 flex-wrap">
         {canConfirmPayment && (
-          <button
-            onClick={() => onAction('confirmPayment', transaction)}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm"
-          >
-            Konfirmasi Pembayaran
-          </button>
+          <>
+            <button
+              onClick={() => onAction('confirmPayment', transaction)}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm"
+            >
+              Konfirmasi Pembayaran
+            </button>
+            <button
+              onClick={() => onAction('simulatePayment', transaction)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm"
+            >
+              Simulasi Bayar
+            </button>
+          </>
         )}
         
         {canReleaseFunds && (
@@ -128,7 +137,6 @@ const EscrowTransactionCard = ({ transaction, onAction }) => {
     </div>
   );
 };
-
 
 const ConfirmPaymentModal = ({ transaction, onClose, onConfirm }) => {
   const [paymentHash, setPaymentHash] = useState('');
@@ -370,13 +378,26 @@ const AdminDashboard = () => {
         setShowPaymentModal(true);
         break;
 
+      case 'simulatePayment':
+        // Generate random hash for simulation
+        const simulatedHash = `0x${Math.random().toString(16).substring(2, 66)}`;
+        confirmPaymentReceived(transaction.id, simulatedHash);
+        break;
+
       case 'releaseFunds':
-        releaseFunds(transaction.id);
+        if (window.confirm(`Release ${transaction.priceETH} ETH to seller ${transaction.sellerWallet}?`)) {
+          releaseFunds(transaction.id);
+        }
         break;
 
       case 'resolveDispute':
-        const resolution = params.refund ? 'Refunded to buyer due to valid dispute' : 'Released to seller - dispute resolved in favor of seller';
-        resolveDispute(transaction.disputeId, resolution, params.refund);
+        const resolution = params.refund 
+          ? 'Refunded to buyer due to valid dispute' 
+          : 'Released to seller - dispute resolved in favor of seller';
+        
+        if (window.confirm(`${params.refund ? 'Refund to buyer' : 'Release to seller'}?`)) {
+          resolveDispute(transaction.disputeId, resolution, params.refund);
+        }
         break;
 
       case 'viewDetails':
@@ -400,18 +421,20 @@ const AdminDashboard = () => {
   const stats = getAdminStats();
 
   const filterTransactions = (status) => {
-    if (status === 'active') {
-      return escrowTransactions.filter(t => 
-        [ESCROW_STATUS.PAYMENT_RECEIVED, ESCROW_STATUS.ACCOUNT_DELIVERED, ESCROW_STATUS.BUYER_CONFIRMED].includes(t.status)
-      );
+    switch (status) {
+      case 'active':
+        return escrowTransactions.filter(t => 
+          [ESCROW_STATUS.PAYMENT_RECEIVED, ESCROW_STATUS.ACCOUNT_DELIVERED, ESCROW_STATUS.BUYER_CONFIRMED].includes(t.status)
+        );
+      case 'disputed':
+        return escrowTransactions.filter(t => t.status === ESCROW_STATUS.DISPUTED);
+      case 'pending':
+        return escrowTransactions.filter(t => t.status === ESCROW_STATUS.PENDING_PAYMENT);
+      case 'completed':
+        return escrowTransactions.filter(t => t.status === ESCROW_STATUS.COMPLETED);
+      default:
+        return escrowTransactions;
     }
-    if (status === 'disputed') {
-      return escrowTransactions.filter(t => t.status === ESCROW_STATUS.DISPUTED);
-    }
-    if (status === 'pending') {
-      return escrowTransactions.filter(t => t.status === ESCROW_STATUS.PENDING_PAYMENT);
-    }
-    return escrowTransactions;
   };
 
   if (!isAdmin) {
@@ -431,6 +454,7 @@ const AdminDashboard = () => {
       </div>
     );
   }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
@@ -459,7 +483,7 @@ const AdminDashboard = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-600 text-sm">Active Escrow</p>
-                <p className="text-2xl font-bold text-green-600">{stats.activeEscrows}</p>
+                <p className="text-2xl font-bold text-green-600">{stats.activeTransactions}</p>
               </div>
               <div className="text-green-500 text-3xl">🔄</div>
             </div>
@@ -468,20 +492,53 @@ const AdminDashboard = () => {
           <div className="bg-white rounded-xl shadow-lg p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-600 text-sm">Pending Disputes</p>
-                <p className="text-2xl font-bold text-red-600">{stats.pendingDisputes}</p>
+                <p className="text-gray-600 text-sm">Total Volume</p>
+                <p className="text-2xl font-bold text-blue-600">{formatETH(stats.totalVolume)} ETH</p>
               </div>
-              <div className="text-red-500 text-3xl">⚠️</div>
+              <div className="text-blue-500 text-3xl">💰</div>
             </div>
           </div>
 
           <div className="bg-white rounded-xl shadow-lg p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-600 text-sm">Total Volume</p>
-                <p className="text-2xl font-bold text-blue-600">{stats.totalVolume.toFixed(4)} ETH</p>
+                <p className="text-gray-600 text-sm">In Escrow</p>
+                <p className="text-2xl font-bold text-purple-600">{formatETH(stats.totalInEscrow)} ETH</p>
               </div>
-              <div className="text-blue-500 text-3xl">💰</div>
+              <div className="text-purple-500 text-3xl">🔒</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Additional Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div className="bg-yellow-50 rounded-xl shadow-lg p-6 border border-yellow-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-yellow-800 text-sm">Pending Payments</p>
+                <p className="text-2xl font-bold text-yellow-600">{stats.pendingPayments}</p>
+              </div>
+              <div className="text-yellow-500 text-3xl">⏳</div>
+            </div>
+          </div>
+
+          <div className="bg-red-50 rounded-xl shadow-lg p-6 border border-red-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-red-800 text-sm">Disputes</p>
+                <p className="text-2xl font-bold text-red-600">{stats.disputedTransactions}</p>
+              </div>
+              <div className="text-red-500 text-3xl">⚠️</div>
+            </div>
+          </div>
+
+          <div className="bg-green-50 rounded-xl shadow-lg p-6 border border-green-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-green-800 text-sm">Completed</p>
+                <p className="text-2xl font-bold text-green-600">{stats.completedTransactions}</p>
+              </div>
+              <div className="text-green-500 text-3xl">✅</div>
             </div>
           </div>
         </div>
@@ -500,16 +557,6 @@ const AdminDashboard = () => {
               Overview ({escrowTransactions.length})
             </button>
             <button
-              onClick={() => setActiveTab('active')}
-              className={`px-6 py-3 rounded-lg font-semibold text-sm transition ${
-                activeTab === 'active'
-                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              Active ({filterTransactions('active').length})
-            </button>
-            <button
               onClick={() => setActiveTab('pending')}
               className={`px-6 py-3 rounded-lg font-semibold text-sm transition ${
                 activeTab === 'pending'
@@ -520,6 +567,16 @@ const AdminDashboard = () => {
               Pending Payment ({filterTransactions('pending').length})
             </button>
             <button
+              onClick={() => setActiveTab('active')}
+              className={`px-6 py-3 rounded-lg font-semibold text-sm transition ${
+                activeTab === 'active'
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Active ({filterTransactions('active').length})
+            </button>
+            <button
               onClick={() => setActiveTab('disputed')}
               className={`px-6 py-3 rounded-lg font-semibold text-sm transition ${
                 activeTab === 'disputed'
@@ -528,6 +585,16 @@ const AdminDashboard = () => {
               }`}
             >
               Disputed ({filterTransactions('disputed').length})
+            </button>
+            <button
+              onClick={() => setActiveTab('completed')}
+              className={`px-6 py-3 rounded-lg font-semibold text-sm transition ${
+                activeTab === 'completed'
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Completed ({filterTransactions('completed').length})
             </button>
           </div>
         </div>
@@ -560,21 +627,32 @@ const AdminDashboard = () => {
         {/* Admin Actions Info */}
         <div className="mt-12 bg-yellow-50 border border-yellow-200 rounded-xl p-6">
           <h3 className="font-bold text-yellow-800 mb-4">Admin Actions Guide</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-yellow-700">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-yellow-700">
             <div>
               <h4 className="font-semibold mb-2">Payment Confirmation:</h4>
               <ul className="space-y-1">
-                <li>• Verify payment hash on blockchain</li>
-                <li>• Confirm payment amount matches</li>
-                <li>• Update transaction status</li>
+                <li>• Verify payment on blockchain</li>
+                <li>• Check amount matches</li>
+                <li>• Confirm payment received</li>
+                <li>• Use "Simulasi Bayar" for testing</li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-2">Fund Release:</h4>
+              <ul className="space-y-1">
+                <li>• Wait for buyer confirmation</li>
+                <li>• Check delivery proof</li>
+                <li>• Release funds to seller</li>
+                <li>• Auto-release after 24h</li>
               </ul>
             </div>
             <div>
               <h4 className="font-semibold mb-2">Dispute Resolution:</h4>
               <ul className="space-y-1">
                 <li>• Review dispute reason</li>
-                <li>• Check account delivery details</li>
-                <li>• Make fair decision based on evidence</li>
+                <li>• Check evidence from both parties</li>
+                <li>• Decide fair resolution</li>
+                <li>• Refund or release accordingly</li>
               </ul>
             </div>
           </div>

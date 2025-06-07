@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Header from '../components/Header';
+import { useAuth } from '../context/AuthContext';
+import { useAdmin, ESCROW_STATUS } from '../context/AdminContext';
 
 // Transaction types
 const TRANSACTION_TYPES = {
@@ -11,36 +13,32 @@ const TRANSACTION_STATUS = {
   PENDING: 'pending',
   COMPLETED: 'selesai',
   FAILED: 'gagal',
-  CANCELLED: 'dibatalkan'
-};
-
-// Using status from ORDER_STATUS for mapping
-const ORDER_STATUS = {
-  CART: 'keranjang',
-  ORDER: 'pesanan', 
-  FAILED: 'gagal',
-  COMPLETED: 'selesai'
+  CANCELLED: 'dibatalkan',
+  ESCROW: 'escrow'
 };
 
 const STATUS_LABELS = {
   [TRANSACTION_STATUS.PENDING]: 'Pending',
   [TRANSACTION_STATUS.COMPLETED]: 'Selesai',
   [TRANSACTION_STATUS.FAILED]: 'Gagal',
-  [TRANSACTION_STATUS.CANCELLED]: 'Dibatalkan'
+  [TRANSACTION_STATUS.CANCELLED]: 'Dibatalkan',
+  [TRANSACTION_STATUS.ESCROW]: 'In Escrow'
 };
 
 const STATUS_COLORS = {
   [TRANSACTION_STATUS.PENDING]: 'bg-yellow-500',
   [TRANSACTION_STATUS.COMPLETED]: 'bg-green-500',
   [TRANSACTION_STATUS.FAILED]: 'bg-red-500',
-  [TRANSACTION_STATUS.CANCELLED]: 'bg-gray-500'
+  [TRANSACTION_STATUS.CANCELLED]: 'bg-gray-500',
+  [TRANSACTION_STATUS.ESCROW]: 'bg-purple-500'
 };
 
 const STATUS_ICONS = {
   [TRANSACTION_STATUS.PENDING]: '⏳',
   [TRANSACTION_STATUS.COMPLETED]: '✅',
   [TRANSACTION_STATUS.FAILED]: '❌',
-  [TRANSACTION_STATUS.CANCELLED]: '🚫'
+  [TRANSACTION_STATUS.CANCELLED]: '🚫',
+  [TRANSACTION_STATUS.ESCROW]: '🔒'
 };
 
 const TYPE_ICONS = {
@@ -70,75 +68,90 @@ const formatCurrency = (amount, currency = 'IDR') => {
   return amount;
 };
 
-// Convert order status to transaction status with improved logic
-const mapOrderStatusToTransactionStatus = (order) => {
-  if (order.status === ORDER_STATUS.COMPLETED) {
-    return TRANSACTION_STATUS.COMPLETED;
-  }
+// Convert escrow transactions to transaction history format
+const convertEscrowToTransactions = (escrowTransactions, walletAddress) => {
+  const transactions = [];
   
-  if (order.status === ORDER_STATUS.FAILED) {
-    return TRANSACTION_STATUS.FAILED;
-  }
+  escrowTransactions.forEach(escrow => {
+    // Create transaction for buyer
+    if (escrow.buyerWallet === walletAddress) {
+      transactions.push({
+        id: `buy_${escrow.id}`,
+        type: TRANSACTION_TYPES.PURCHASE,
+        status: mapEscrowStatus(escrow.status),
+        itemTitle: escrow.accountTitle,
+        gameName: escrow.gameName,
+        price: `${escrow.priceETH} ETH`,
+        priceIDR: parseFloat(escrow.priceIDR),
+        sellerName: `Seller-${escrow.sellerWallet.substring(0, 6)}`,
+        buyerName: 'You',
+        paymentMethod: 'Ethereum (ETH)',
+        transactionHash: escrow.paymentHash,
+        escrowId: escrow.id,
+        escrowStatus: escrow.status,
+        totalAmount: `${escrow.priceETH} ETH`,
+        createdAt: escrow.createdAt,
+        completedAt: escrow.status === ESCROW_STATUS.COMPLETED ? escrow.releasedAt : null,
+        image: escrow.accountDetails?.image || 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=100&h=100&fit=crop',
+        level: escrow.accountDetails?.level,
+        rank: escrow.accountDetails?.rank,
+        description: escrow.accountDetails?.description,
+        timeline: escrow.timeline
+      });
+    }
+    
+    // Create transaction for seller
+    if (escrow.sellerWallet === walletAddress) {
+      transactions.push({
+        id: `sell_${escrow.id}`,
+        type: TRANSACTION_TYPES.SALE,
+        status: mapEscrowStatus(escrow.status),
+        itemTitle: escrow.accountTitle,
+        gameName: escrow.gameName,
+        price: `${escrow.priceETH} ETH`,
+        priceIDR: parseFloat(escrow.priceIDR),
+        sellerName: 'You',
+        buyerName: `Buyer-${escrow.buyerWallet.substring(0, 6)}`,
+        paymentMethod: 'Ethereum (ETH)',
+        transactionHash: escrow.paymentHash,
+        escrowId: escrow.id,
+        escrowStatus: escrow.status,
+        totalAmount: `${escrow.priceETH} ETH`,
+        createdAt: escrow.createdAt,
+        completedAt: escrow.status === ESCROW_STATUS.COMPLETED ? escrow.releasedAt : null,
+        image: escrow.accountDetails?.image || 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=100&h=100&fit=crop',
+        level: escrow.accountDetails?.level,
+        rank: escrow.accountDetails?.rank,
+        description: escrow.accountDetails?.description,
+        timeline: escrow.timeline
+      });
+    }
+  });
   
-  // Check if order has transaction hash (assume completed if has hash)
-  if (order.transactionHash) {
-    return TRANSACTION_STATUS.COMPLETED;
-  }
-  
-  // Check if order is expired (older than 15 minutes)
-  const orderAge = Date.now() - (order.createdAt || Date.now());
-  const FIFTEEN_MINUTES = 15 * 60 * 1000;
-  
-  if (orderAge > FIFTEEN_MINUTES) {
-    return TRANSACTION_STATUS.FAILED;
-  }
-  
-  return TRANSACTION_STATUS.PENDING;
+  return transactions;
 };
 
-// Convert orders to transactions with improved status handling
-const convertOrdersToTransactions = (orders) => {
-  return orders
-    .filter(order => order.status !== ORDER_STATUS.CART) // Exclude cart items
-    .map(order => {
-      const basePrice = parseFloat(order.originalPrice?.toString().replace(/[^\d.]/g, '') || 
-                       parseFloat(order.price?.toString().replace(/[^\d.]/g, '') || 0));
-      
-      const status = mapOrderStatusToTransactionStatus(order);
-      const isCompleted = status === TRANSACTION_STATUS.COMPLETED;
-      const isFailed = status === TRANSACTION_STATUS.FAILED;
-      
-      return {
-        id: order.id,
-        type: TRANSACTION_TYPES.PURCHASE, // Assuming all orders are purchases
-        status,
-        itemTitle: order.title,
-        gameName: order.gameName,
-        price: order.price,
-        priceIDR: order.totalPriceIDR ? parseFloat(order.totalPriceIDR) : basePrice,
-        sellerName: order.sellerName || 'Penjual',
-        buyerName: 'Anda', // Current user is always the buyer
-        paymentMethod: order.paymentMethod || 'Ethereum (ETH)',
-        transactionHash: order.transactionHash || null,
-        networkFee: order.gasFee ? `${order.gasFee} ETH` : '0.000050 ETH',
-        totalAmount: order.totalPriceETH ? `${order.totalPriceETH} ETH` : order.price,
-        createdAt: order.createdAt || Date.now(),
-        completedAt: isCompleted ? (order.completedAt || order.createdAt) : null,
-        failedAt: isFailed ? (order.failedAt || order.createdAt) : null,
-        failureReason: isFailed ? (order.failureReason || 'Waktu pembayaran habis') : null,
-        image: order.image || 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=100&h=100&fit=crop',
-        // Additional order specific data
-        level: order.level,
-        rank: order.rank,
-        description: order.description,
-        paymentAddress: order.paymentAddress,
-        paymentNetwork: order.paymentNetwork,
-        minConfirmations: order.minConfirmations
-      };
-    });
+// Map escrow status to transaction status
+const mapEscrowStatus = (escrowStatus) => {
+  switch (escrowStatus) {
+    case ESCROW_STATUS.COMPLETED:
+      return TRANSACTION_STATUS.COMPLETED;
+    case ESCROW_STATUS.CANCELLED:
+    case ESCROW_STATUS.REFUNDED:
+      return TRANSACTION_STATUS.CANCELLED;
+    case ESCROW_STATUS.DISPUTED:
+      return TRANSACTION_STATUS.ESCROW;
+    case ESCROW_STATUS.PENDING_PAYMENT:
+    case ESCROW_STATUS.PAYMENT_RECEIVED:
+    case ESCROW_STATUS.ACCOUNT_DELIVERED:
+    case ESCROW_STATUS.BUYER_CONFIRMED:
+      return TRANSACTION_STATUS.ESCROW;
+    default:
+      return TRANSACTION_STATUS.PENDING;
+  }
 };
 
-// TransactionDetailModal component remains the same
+// TransactionDetailModal component
 const TransactionDetailModal = ({ transaction, onClose }) => {
   if (!transaction) return null;
 
@@ -172,6 +185,12 @@ const TransactionDetailModal = ({ transaction, onClose }) => {
           <div className="bg-gray-50 p-4 rounded-lg mb-6">
             <p className="text-sm font-medium text-gray-600 mb-1">ID Transaksi</p>
             <p className="font-mono text-sm text-gray-800">{transaction.id}</p>
+            {transaction.escrowId && (
+              <>
+                <p className="text-sm font-medium text-gray-600 mb-1 mt-2">Escrow ID</p>
+                <p className="font-mono text-sm text-gray-800">{transaction.escrowId}</p>
+              </>
+            )}
           </div>
 
           {/* Item Details */}
@@ -232,10 +251,6 @@ const TransactionDetailModal = ({ transaction, onClose }) => {
                     <span className="font-medium">{formatCurrency(transaction.priceIDR)}</span>
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Network Fee:</span>
-                  <span className="font-medium">{transaction.networkFee}</span>
-                </div>
                 <hr className="my-2" />
                 <div className="flex justify-between font-bold">
                   <span>Total:</span>
@@ -247,20 +262,6 @@ const TransactionDetailModal = ({ transaction, onClose }) => {
                   <p className="text-sm font-medium text-gray-600">Metode Pembayaran</p>
                   <p className="text-gray-800">{transaction.paymentMethod}</p>
                 </div>
-                {transaction.paymentNetwork && (
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Network</p>
-                    <p className="text-gray-800">{transaction.paymentNetwork}</p>
-                  </div>
-                )}
-                {transaction.paymentAddress && (
-                  <div>
-                    <p className="text-sm font-medium text-gray-600">Payment Address</p>
-                    <p className="font-mono text-xs text-gray-600 break-all">
-                      {transaction.paymentAddress}
-                    </p>
-                  </div>
-                )}
                 {transaction.transactionHash && (
                   <div>
                     <p className="text-sm font-medium text-gray-600">Transaction Hash</p>
@@ -274,47 +275,48 @@ const TransactionDetailModal = ({ transaction, onClose }) => {
           </div>
 
           {/* Timeline */}
-          <div className="mb-6">
-            <h3 className="font-semibold text-gray-800 mb-4">Timeline Transaksi</h3>
-            <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                <div>
-                  <p className="font-medium text-gray-800">Transaksi Dibuat</p>
-                  <p className="text-sm text-gray-600">{formatDate(transaction.createdAt)}</p>
-                </div>
+          {transaction.timeline && transaction.timeline.length > 0 && (
+            <div className="mb-6">
+              <h3 className="font-semibold text-gray-800 mb-4">Timeline Transaksi</h3>
+              <div className="space-y-3">
+                {transaction.timeline.map((event, index) => (
+                  <div key={index} className="flex items-center gap-3">
+                    <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                    <div>
+                      <p className="font-medium text-gray-800">{event.note}</p>
+                      <p className="text-sm text-gray-600">{formatDate(event.timestamp)}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
-              
-              {transaction.completedAt && (
-                <div className="flex items-center gap-3">
-                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                  <div>
-                    <p className="font-medium text-gray-800">Transaksi Selesai</p>
-                    <p className="text-sm text-gray-600">{formatDate(transaction.completedAt)}</p>
-                  </div>
-                </div>
-              )}
-              
-              {transaction.failedAt && (
-                <div className="flex items-center gap-3">
-                  <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                  <div>
-                    <p className="font-medium text-gray-800">Transaksi Gagal</p>
-                    <p className="text-sm text-gray-600">{formatDate(transaction.failedAt)}</p>
-                    {transaction.failureReason && (
-                      <p className="text-sm text-red-600">Alasan: {transaction.failureReason}</p>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
-          </div>
+          )}
+
+          {/* Escrow Status Info */}
+          {transaction.escrowStatus && (
+            <div className="bg-purple-50 p-4 rounded-lg mb-6">
+              <h3 className="font-semibold text-purple-800 mb-2">Status Escrow</h3>
+              <p className="text-purple-700">
+                {transaction.escrowStatus === ESCROW_STATUS.PENDING_PAYMENT && 'Menunggu pembayaran'}
+                {transaction.escrowStatus === ESCROW_STATUS.PAYMENT_RECEIVED && 'Pembayaran diterima, menunggu pengiriman akun'}
+                {transaction.escrowStatus === ESCROW_STATUS.ACCOUNT_DELIVERED && 'Akun telah dikirim, menunggu konfirmasi pembeli'}
+                {transaction.escrowStatus === ESCROW_STATUS.BUYER_CONFIRMED && 'Pembeli telah konfirmasi, menunggu release dana'}
+                {transaction.escrowStatus === ESCROW_STATUS.COMPLETED && 'Transaksi selesai, dana telah dirilis'}
+                {transaction.escrowStatus === ESCROW_STATUS.DISPUTED && 'Dalam sengketa'}
+                {transaction.escrowStatus === ESCROW_STATUS.REFUNDED && 'Dana dikembalikan ke pembeli'}
+                {transaction.escrowStatus === ESCROW_STATUS.CANCELLED && 'Transaksi dibatalkan'}
+              </p>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-3">
-            {transaction.transactionHash && (
-              <button className="flex-1 bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium">
-                Lihat di Blockchain
+            {transaction.escrowId && transaction.status === TRANSACTION_STATUS.ESCROW && (
+              <button 
+                onClick={() => window.location.href = '/escrow'}
+                className="flex-1 bg-purple-600 text-white py-3 rounded-lg hover:bg-purple-700 transition-colors font-medium"
+              >
+                Lihat di Escrow
               </button>
             )}
             <button 
@@ -330,7 +332,7 @@ const TransactionDetailModal = ({ transaction, onClose }) => {
   );
 };
 
-// TransactionCard component remains the same
+// TransactionCard component
 const TransactionCard = ({ transaction, onClick }) => {
   const isPurchase = transaction.type === TRANSACTION_TYPES.PURCHASE;
   
@@ -386,6 +388,7 @@ const TransactionCard = ({ transaction, onClick }) => {
               transaction.status === TRANSACTION_STATUS.COMPLETED ? 'text-green-600' :
               transaction.status === TRANSACTION_STATUS.FAILED ? 'text-red-600' :
               transaction.status === TRANSACTION_STATUS.PENDING ? 'text-yellow-600' :
+              transaction.status === TRANSACTION_STATUS.ESCROW ? 'text-purple-600' :
               'text-gray-600'
             }`}>
               {STATUS_LABELS[transaction.status]}
@@ -407,6 +410,8 @@ const TransactionCard = ({ transaction, onClick }) => {
 };
 
 const RiwayatTransaksi = () => {
+  const { walletAddress } = useAuth();
+  const { escrowTransactions } = useAdmin();
   const [transactions, setTransactions] = useState([]);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [filterType, setFilterType] = useState('all');
@@ -414,22 +419,16 @@ const RiwayatTransaksi = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    // Load transactions from orders data
+    // Load transactions from escrow data
     const loadTransactions = () => {
       try {
-        // Get orders from localStorage
-        const storedOrders = JSON.parse(localStorage.getItem('orders') || '[]');
-        
-        // Convert orders to transactions with improved status handling
-        const transactionsFromOrders = convertOrdersToTransactions(storedOrders);
+        // Get escrow transactions and convert them
+        const escrowTxns = convertEscrowToTransactions(escrowTransactions, walletAddress);
         
         // Sort by date (newest first)
-        transactionsFromOrders.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        escrowTxns.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         
-        setTransactions(transactionsFromOrders);
-        
-        // Update localStorage with clean transactions
-        localStorage.setItem('transactions', JSON.stringify(transactionsFromOrders));
+        setTransactions(escrowTxns);
       } catch (error) {
         console.error('Error loading transactions:', error);
         setTransactions([]);
@@ -437,17 +436,7 @@ const RiwayatTransaksi = () => {
     };
 
     loadTransactions();
-
-    // Listen for storage changes (when orders are updated)
-    const handleStorageChange = (e) => {
-      if (e.key === 'orders') {
-        loadTransactions();
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
+  }, [escrowTransactions, walletAddress]);
 
   // Filter transactions based on selected filters
   const filteredTransactions = transactions.filter(transaction => {
@@ -462,13 +451,15 @@ const RiwayatTransaksi = () => {
   // Calculate transaction statistics
   const totalTransactions = transactions.length;
   const completedTransactions = transactions.filter(t => t.status === TRANSACTION_STATUS.COMPLETED).length;
+  const escrowTransactionsCount = transactions.filter(t => t.status === TRANSACTION_STATUS.ESCROW).length;
   const failedTransactions = transactions.filter(t => t.status === TRANSACTION_STATUS.FAILED).length;
-  const pendingTransactions = transactions.filter(t => t.status === TRANSACTION_STATUS.PENDING).length;
+  const purchaseTransactions = transactions.filter(t => t.type === TRANSACTION_TYPES.PURCHASE).length;
+  const saleTransactions = transactions.filter(t => t.type === TRANSACTION_TYPES.SALE).length;
 
   // Status tabs for responsive filtering
   const statusTabs = [
     { id: 'all', label: 'Semua', count: totalTransactions },
-    { id: TRANSACTION_STATUS.PENDING, label: 'Pending', count: pendingTransactions },
+    { id: TRANSACTION_STATUS.ESCROW, label: 'In Escrow', count: escrowTransactionsCount },
     { id: TRANSACTION_STATUS.COMPLETED, label: 'Selesai', count: completedTransactions },
     { id: TRANSACTION_STATUS.FAILED, label: 'Gagal', count: failedTransactions },
   ];
@@ -499,20 +490,20 @@ const RiwayatTransaksi = () => {
             <div className="bg-white rounded-xl shadow-lg p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-gray-600 text-sm font-medium">Transaksi Selesai</p>
-                  <p className="text-3xl font-bold text-green-600">{completedTransactions}</p>
+                  <p className="text-gray-600 text-sm font-medium">Pembelian</p>
+                  <p className="text-3xl font-bold text-blue-600">{purchaseTransactions}</p>
                 </div>
-                <div className="text-4xl">✅</div>
+                <div className="text-4xl">🛒</div>
               </div>
             </div>
             
             <div className="bg-white rounded-xl shadow-lg p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-gray-600 text-sm font-medium">Transaksi Gagal</p>
-                  <p className="text-3xl font-bold text-red-600">{failedTransactions}</p>
+                  <p className="text-gray-600 text-sm font-medium">Penjualan</p>
+                  <p className="text-3xl font-bold text-green-600">{saleTransactions}</p>
                 </div>
-                <div className="text-4xl">❌</div>
+                <div className="text-4xl">💰</div>
               </div>
             </div>
           </div>

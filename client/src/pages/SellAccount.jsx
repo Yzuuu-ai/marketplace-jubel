@@ -3,17 +3,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
-
-// Reuse order constants from Pesanan.jsx
-const ORDER_STATUS = {
-  CART: 'keranjang',
-  ORDER: 'pesanan', 
-  FAILED: 'gagal',
-  COMPLETED: 'selesai'
-};
+import { useAdmin, ESCROW_STATUS, ESCROW_STATUS_LABELS, ESCROW_STATUS_COLORS } from '../context/AdminContext';
 
 const SellAccount = () => {
   const { walletAddress, isAuthenticated } = useAuth();
+  const { escrowTransactions } = useAdmin();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('sell');
   const [isEditing, setIsEditing] = useState(false);
@@ -61,13 +55,30 @@ const SellAccount = () => {
     const allAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
     const myAccounts = allAccounts.filter(acc => acc.sellerWallet === walletAddress);
     
+    // Add escrow status to accounts
+    const accountsWithEscrow = myAccounts.map(account => {
+      if (account.escrowId) {
+        const escrowTx = escrowTransactions.find(tx => tx.id === account.escrowId);
+        if (escrowTx) {
+          return {
+            ...account,
+            escrowStatus: escrowTx.status,
+            escrowTransaction: escrowTx
+          };
+        }
+      }
+      return account;
+    });
+    
     if (filterStatus === 'available') {
-      return myAccounts.filter(acc => !acc.isSold);
+      return accountsWithEscrow.filter(acc => !acc.isSold && !acc.isInEscrow);
     } else if (filterStatus === 'sold') {
-      return myAccounts.filter(acc => acc.isSold);
+      return accountsWithEscrow.filter(acc => acc.isSold);
+    } else if (filterStatus === 'escrow') {
+      return accountsWithEscrow.filter(acc => acc.isInEscrow);
     }
-    return myAccounts;
-  }, [walletAddress, filterStatus]);
+    return accountsWithEscrow;
+  }, [walletAddress, filterStatus, escrowTransactions]);
 
   const refreshListings = useCallback(() => {
     setMyListings(getMyListings());
@@ -146,6 +157,7 @@ const SellAccount = () => {
           sellerName: `Seller-${walletAddress.substring(0, 6)}`,
           createdAt: new Date().toISOString(),
           isSold: false,
+          isInEscrow: false,
           soldAt: null,
           buyerWallet: null,
           buyerName: null
@@ -184,24 +196,23 @@ const SellAccount = () => {
   };
 
   const handleDelete = (id) => {
-    // First remove from gameAccounts
-    const existingAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
-    const updatedAccounts = existingAccounts.filter(acc => acc.id !== id);
-    localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
+    const account = myListings.find(acc => acc.id === id);
+    if (account.isInEscrow) {
+      alert('Tidak dapat menghapus akun yang sedang dalam proses escrow');
+      return;
+    }
     
-    // Then remove from orders if exists
-    const existingOrders = JSON.parse(localStorage.getItem('orders') || '[]');
-    const updatedOrders = existingOrders.filter(order => 
-      !(order.isAccount && order.accountId === id)
-    );
-    localStorage.setItem('orders', JSON.stringify(updatedOrders));
-    
-    refreshListings();
+    if (window.confirm('Yakin ingin menghapus akun ini?')) {
+      const existingAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
+      const updatedAccounts = existingAccounts.filter(acc => acc.id !== id);
+      localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
+      refreshListings();
+    }
   };
 
   const handleEdit = (account) => {
-    if (account.isSold) {
-      alert('Akun yang sudah terjual tidak dapat diedit');
+    if (account.isSold || account.isInEscrow) {
+      alert('Akun yang sudah terjual atau dalam escrow tidak dapat diedit');
       return;
     }
 
@@ -220,54 +231,29 @@ const SellAccount = () => {
     setActiveTab('sell');
   };
 
-  const handleMarkAsSold = (id, buyerAddress = null) => {
-    const existingAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
-    const updatedAccounts = existingAccounts.map(acc =>
-      acc.id === id
-        ? {
-            ...acc,
-            isSold: true,
-            soldAt: new Date().toISOString(),
-            buyerWallet: buyerAddress || `0x${Math.random().toString(16).substring(2, 42)}`,
-            buyerName: buyerAddress ? `Buyer-${buyerAddress.substring(0, 6)}` : `Buyer-${Math.random().toString(16).substring(2, 8)}`
-          }
-        : acc
-    );
-    localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
-    refreshListings();
-  };
-
-  const handleMarkAsAvailable = (id) => {
-    const existingAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
-    const updatedAccounts = existingAccounts.map(acc =>
-      acc.id === id
-        ? {
-            ...acc,
-            isSold: false,
-            soldAt: null,
-            buyerWallet: null,
-            buyerName: null
-          }
-        : acc
-    );
-    localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
-    refreshListings();
-  };
-
   const getAccountStats = () => {
     const allMyAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]')
       .filter(acc => acc.sellerWallet === walletAddress);
     
     return {
       total: allMyAccounts.length,
-      available: allMyAccounts.filter(acc => !acc.isSold).length,
-      sold: allMyAccounts.filter(acc => acc.isSold).length
+      available: allMyAccounts.filter(acc => !acc.isSold && !acc.isInEscrow).length,
+      sold: allMyAccounts.filter(acc => acc.isSold).length,
+      inEscrow: allMyAccounts.filter(acc => acc.isInEscrow).length
     };
   };
 
-  
-
   const stats = getAccountStats();
+
+  const getEscrowStatusBadge = (account) => {
+    if (!account.escrowStatus) return null;
+    
+    return (
+      <span className={`px-2 py-1 rounded-full text-white text-xs font-medium ${ESCROW_STATUS_COLORS[account.escrowStatus]}`}>
+        {ESCROW_STATUS_LABELS[account.escrowStatus]}
+      </span>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -538,11 +524,11 @@ const SellAccount = () => {
                 </li>
                 <li className="flex items-start">
                   <span className="mr-2">•</span>
-                  <span className="text-left">Transaksi aman melalui sistem blockchain kami</span>
+                  <span className="text-left">Transaksi aman melalui sistem escrow blockchain kami</span>
                 </li>
                 <li className="flex items-start">
                   <span className="mr-2">•</span>
-                  <span className="text-left">Gunakan gambar yang jelas untuk menarik pembeli</span>
+                  <span className="text-left">Dana akan dirilis setelah pembeli konfirmasi penerimaan</span>
                 </li>
               </ul>
             </div>
@@ -561,6 +547,9 @@ const SellAccount = () => {
                   </div>
                   <div className="bg-green-100 text-green-800 px-3 py-1 rounded-full">
                     Tersedia: {stats.available}
+                  </div>
+                  <div className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full">
+                    Escrow: {stats.inEscrow}
                   </div>
                   <div className="bg-red-100 text-red-800 px-3 py-1 rounded-full">
                     Terjual: {stats.sold}
@@ -586,6 +575,14 @@ const SellAccount = () => {
                   Tersedia ({stats.available})
                 </button>
                 <button
+                  onClick={() => setFilterStatus('escrow')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                    filterStatus === 'escrow' ? 'bg-purple-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  In Escrow ({stats.inEscrow})
+                </button>
+                <button
                   onClick={() => setFilterStatus('sold')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
                     filterStatus === 'sold' ? 'bg-red-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
@@ -601,6 +598,7 @@ const SellAccount = () => {
                 <p className="text-gray-600">
                   {filterStatus === 'all' ? 'Belum ada akun yang dijual.' :
                    filterStatus === 'available' ? 'Belum ada akun yang tersedia.' :
+                   filterStatus === 'escrow' ? 'Belum ada akun dalam proses escrow.' :
                    'Belum ada akun yang terjual.'}
                 </p>
               </div>
@@ -608,7 +606,9 @@ const SellAccount = () => {
               <div className="grid gap-6">
                 {myListings.map(account => (
                   <div key={account.id} className={`bg-white rounded-xl shadow-md p-4 border-l-4 ${
-                    account.isSold ? 'border-red-500 bg-red-50' : 'border-green-500'
+                    account.isSold ? 'border-red-500 bg-red-50' : 
+                    account.isInEscrow ? 'border-purple-500 bg-purple-50' : 
+                    'border-green-500'
                   }`}>
                     <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
                       <div className="flex items-center gap-4 flex-1">
@@ -630,7 +630,17 @@ const SellAccount = () => {
                         </div>
                       </div>
 
-                      {account.isSold ? (
+                      {account.isInEscrow && account.escrowStatus ? (
+                        <div className="flex items-center gap-2">
+                          {getEscrowStatusBadge(account)}
+                          <button
+                            onClick={() => navigate('/escrow')}
+                            className="px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 transition"
+                          >
+                            View Escrow
+                          </button>
+                        </div>
+                      ) : account.isSold ? (
                         <div className="bg-red-100 border border-red-200 rounded-lg p-3 min-w-0 lg:min-w-[250px]">
                           <div className="flex items-center gap-2 mb-2">
                             <svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -639,9 +649,6 @@ const SellAccount = () => {
                             <span className="text-sm font-medium text-red-800">TERJUAL</span>
                           </div>
                           <div className="text-xs text-red-700 space-y-1">
-                            <p><strong>Dibeli oleh:</strong></p>
-                            <p className="break-all">{account.buyerName}</p>
-                            <p className="break-all text-gray-600">{account.buyerWallet}</p>
                             <p><strong>Tanggal:</strong> {new Date(account.soldAt).toLocaleDateString('id-ID')}</p>
                           </div>
                         </div>
@@ -660,7 +667,7 @@ const SellAccount = () => {
                       )}
 
                       <div className="flex gap-2 flex-wrap">
-                        {!account.isSold ? (
+                        {!account.isSold && !account.isInEscrow && (
                           <>
                             <button
                               onClick={() => handleEdit(account)}
@@ -674,30 +681,15 @@ const SellAccount = () => {
                             >
                               Hapus
                             </button>
-                            <button
-                              onClick={() => handleMarkAsSold(account.id)}
-                              className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition text-sm"
-                              title="Simulasi: Tandai sebagai terjual"
-                            >
-                              Tandai Terjual
-                            </button>
                           </>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => handleDelete(account.id)}
-                              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm"
-                            >
-                              Hapus
-                            </button>
-                            <button
-                              onClick={() => handleMarkAsAvailable(account.id)}
-                              className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition text-sm"
-                              title="Simulasi: Kembalikan ke status tersedia"
-                            >
-                              Reset Status
-                            </button>
-                          </>
+                        )}
+                        {account.isInEscrow && (
+                          <button
+                            onClick={() => navigate('/escrow')}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm"
+                          >
+                            Lihat Detail Escrow
+                          </button>
                         )}
                       </div>
                     </div>
@@ -713,13 +705,13 @@ const SellAccount = () => {
             )}
 
             {myListings.length > 0 && (
-              <div className="mt-8 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <h4 className="font-medium text-yellow-800 mb-2">Info Testing:</h4>
-                <ul className="text-sm text-yellow-700 space-y-1">
-                  <li>• Tombol "Tandai Terjual" digunakan untuk simulasi ketika akun dibeli</li>
-                  <li>• Tombol "Reset Status" untuk mengembalikan akun ke status tersedia (testing)</li>
-                  <li>• Akun yang sudah terjual tidak dapat diedit</li>
-                  <li>• Filter untuk melihat akun berdasarkan status</li>
+              <div className="mt-8 bg-green-50 border border-green-200 rounded-lg p-4">
+                <h4 className="font-medium text-green-800 mb-2">Info Escrow:</h4>
+                <ul className="text-sm text-green-700 space-y-1">
+                  <li>• Akun yang sedang dalam proses escrow tidak dapat diedit atau dihapus</li>
+                  <li>• Dana akan dirilis ke wallet Anda setelah pembeli konfirmasi penerimaan</li>
+                  <li>• Anda dapat melihat status escrow di halaman Escrow Management</li>
+                  <li>• Kirim detail akun segera setelah pembayaran dikonfirmasi admin</li>
                 </ul>
               </div>
             )}

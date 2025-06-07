@@ -48,11 +48,11 @@ export const ESCROW_STATUS_COLORS = {
 // Admin wallet addresses (untuk demo)
 const ADMIN_WALLETS = [
   '0x742d35Cc6635C0532925a3b8D1c9E5e7c5f47F1a',
-  '0xAdminWallet123456789012345678901234567890'
+  '0x00c120AFdda61E957C524B03b67498938a19eE4D'
 ];
 
 // Escrow wallet address
-export const ESCROW_WALLET = '0xEscrowWallet123456789012345678901234567890';
+export const ESCROW_WALLET = '0x742d35Cc6635C0532925a3b8D1c9E5e7c5f47F1a';
 
 export const AdminProvider = ({ children }) => {
   const [isAdmin, setIsAdmin] = useState(false);
