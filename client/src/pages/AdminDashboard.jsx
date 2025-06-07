@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import Header from '../components/Header';
 import { useAdmin, ESCROW_STATUS_LABELS, ESCROW_STATUS_COLORS } from '../context/AdminContext';
 import { useAuth } from '../context/AuthContext';
+import AdminPaymentModal from '../components/AdminPaymentModal';
 
 const formatDate = (timestamp) => {
   return new Date(timestamp).toLocaleString('id-ID', {
