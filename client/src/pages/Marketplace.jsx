@@ -1,8 +1,10 @@
-// src/pages/Marketplace.jsx - Enhanced with Real Blockchain Payment
-import React, { useState, useEffect } from 'react';
+// src/pages/Marketplace.jsx - Enhanced with Account Details and Seller Profiles
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import BlockchainPaymentSystem from '../components/BlockchainPaymentSystem';
+import SuccessModal from '../components/SuccessModal';
+import AccountDetailModal from '../components/AccountDetailModal';
 import { useAuth } from '../context/AuthContext';
 import { useAdmin } from '../context/AdminContext';
 
@@ -19,57 +21,6 @@ const generateOrderId = () => {
   return 'order_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
 };
 
-// Success Modal Component
-const SuccessModal = ({ message, onClose, onNavigate, transactionHash, explorerUrl }) => {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white p-6 rounded-xl shadow-lg w-full max-w-md">
-        <div className="text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h3 className="text-lg font-semibold mb-2">Payment Successful!</h3>
-          <p className="text-gray-600 mb-4">{message}</p>
-          
-          {transactionHash && (
-            <div className="bg-gray-50 rounded-lg p-3 mb-4">
-              <p className="text-sm font-medium text-gray-700 mb-1">Transaction Hash:</p>
-              <p className="text-xs font-mono text-gray-600 break-all mb-2">{transactionHash}</p>
-              {explorerUrl && (
-                <a
-                  href={explorerUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 hover:text-blue-800 text-sm underline"
-                >
-                  View on Blockchain Explorer
-                </a>
-              )}
-            </div>
-          )}
-          
-          <div className="space-y-2">
-            <button
-              onClick={onNavigate}
-              className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700"
-            >
-              View Escrow Status
-            </button>
-            <button
-              onClick={onClose}
-              className="w-full bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400"
-            >
-              Continue Shopping
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const Marketplace = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -84,23 +35,37 @@ const Marketplace = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [paymentResult, setPaymentResult] = useState(null);
+  
+  // Tambahan state untuk modal detail akun
+  const [showAccountDetail, setShowAccountDetail] = useState(false);
+  const [detailAccount, setDetailAccount] = useState(null);
 
-  // Dapatkan data akun dari localStorage
-  const getGameAccounts = () => {
+  // Dapatkan data akun dari localStorage dengan profil penjual
+  const getGameAccounts = useCallback(() => {
     try {
       const savedAccounts = localStorage.getItem('gameAccounts');
-      return savedAccounts ? JSON.parse(savedAccounts) : [];
+      const accounts = savedAccounts ? JSON.parse(savedAccounts) : [];
+      const userProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
+      
+      // Perkaya akun dengan nama profil pengguna
+      return accounts.map(account => {
+        const sellerProfile = userProfiles[account.sellerWallet];
+        return {
+          ...account,
+          sellerName: sellerProfile?.nama || account.sellerName || `Seller-${account.sellerWallet.substring(0, 6)}`
+        };
+      });
     } catch (error) {
       console.error('Error parsing game accounts:', error);
       return [];
     }
-  };
+  }, []);
 
   // Filter akun berdasarkan game yang dipilih
   useEffect(() => {
     const allAccounts = getGameAccounts();
     
-    // Filter out sold accounts and accounts in escrow
+    // Filter akun yang sudah terjual atau dalam escrow
     const availableAccounts = allAccounts.filter(account => 
       !account.isSold && !account.isInEscrow
     );
@@ -111,7 +76,7 @@ const Marketplace = () => {
       const filtered = availableAccounts.filter(account => account.gameId === selectedGame);
       setFilteredAccounts(filtered);
     }
-  }, [selectedGame]);
+  }, [selectedGame, getGameAccounts]);
 
   useEffect(() => {
     if (gameIdParam) {
@@ -119,18 +84,18 @@ const Marketplace = () => {
     }
   }, [gameIdParam]);
 
-  const handleGameFilter = (gameId) => {
+  const handleGameFilter = useCallback((gameId) => {
     setSelectedGame(gameId);
-  };
+  }, []);
 
-  const handleBuyClick = (account) => {
+  const handleBuyClick = useCallback((account) => {
     if (!isAuthenticated) {
       setSuccessMessage('Silakan login terlebih dahulu untuk melakukan pembelian');
       setShowSuccessModal(true);
       return;
     }
     
-    // Prepare order data for blockchain payment
+    // Persiapkan data pesanan untuk pembayaran blockchain
     const orderData = {
       id: generateOrderId(),
       accountId: account.id,
@@ -144,19 +109,49 @@ const Marketplace = () => {
       sellerName: account.sellerName,
       buyerWallet: walletAddress,
       priceETH: parseFloat(account.price.replace(' ETH', '')),
-      totalPriceETH: parseFloat(account.price.replace(' ETH', '')), // Could add fees here
-      priceIDR: (parseFloat(account.price.replace(' ETH', '')) * 50000000).toFixed(0), // ETH to IDR conversion
+      totalPriceETH: parseFloat(account.price.replace(' ETH', '')), // Bisa tambahkan biaya di sini
+      priceIDR: (parseFloat(account.price.replace(' ETH', '')) * 50000000).toFixed(0), // Konversi ETH ke IDR
     };
     
     setSelectedAccount(orderData);
     setShowPaymentModal(true);
-  };
+  }, [isAuthenticated, walletAddress]);
 
-  const handlePaymentComplete = (paymentData) => {
+  // Handle navigasi dari halaman Beranda
+  useEffect(() => {
+    if (location.state) {
+      if (location.state.selectedAccountId) {
+        // Cari dan tampilkan akun untuk pembelian
+        const allAccounts = getGameAccounts();
+        const account = allAccounts.find(acc => acc.id === location.state.selectedAccountId);
+        if (account) {
+          handleBuyClick(account);
+        }
+      } else if (location.state.viewAccountId) {
+        // Cari dan tampilkan detail akun
+        const allAccounts = getGameAccounts();
+        const account = allAccounts.find(acc => acc.id === location.state.viewAccountId);
+        if (account) {
+          const userProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
+          const sellerProfile = userProfiles[account.sellerWallet];
+          const enrichedAccount = {
+            ...account,
+            sellerName: sellerProfile?.nama || account.sellerName || `Seller-${account.sellerWallet.substring(0, 6)}`
+          };
+          setDetailAccount(enrichedAccount);
+          setShowAccountDetail(true);
+        }
+      }
+      // Bersihkan state untuk mencegah trigger ulang
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state, handleBuyClick, getGameAccounts]);
+
+  const handlePaymentComplete = useCallback((paymentData) => {
     try {
       if (!selectedAccount) return;
 
-      // Create escrow transaction with blockchain payment data
+      // Buat transaksi escrow dengan data pembayaran blockchain
       const escrowData = {
         ...selectedAccount,
         paymentHash: paymentData.transactionHash,
@@ -172,8 +167,8 @@ const Marketplace = () => {
       
       setSuccessMessage(`
         Pembayaran blockchain berhasil! 
-        Escrow ID: ${escrowTransaction.id}
-        Transaction Hash: ${paymentData.transactionHash}
+        ID Escrow: ${escrowTransaction.id}
+        Hash Transaksi: ${paymentData.transactionHash}
         Seller akan segera diberitahu untuk mengirim detail akun.
       `);
       setShowSuccessModal(true);
@@ -183,26 +178,26 @@ const Marketplace = () => {
       setSuccessMessage('Pembayaran berhasil tapi terjadi kesalahan dalam membuat escrow. Hubungi admin.');
       setShowSuccessModal(true);
     }
-  };
+  }, [selectedAccount, createEscrowTransaction]);
 
-  const handlePaymentCancel = () => {
+  const handlePaymentCancel = useCallback(() => {
     setShowPaymentModal(false);
     setSelectedAccount(null);
-  };
+  }, []);
 
-  const handleSuccessNavigate = () => {
+  const handleSuccessNavigate = useCallback(() => {
     navigate('/escrow');
-  };
+  }, [navigate]);
 
-  // Convert price display to show both ETH and fiat
-  const formatPriceDisplay = (ethPrice) => {
+  // Konversi harga untuk ditampilkan dalam ETH dan fiat
+  const formatPriceDisplay = useCallback((ethPrice) => {
     const eth = parseFloat(ethPrice.replace(' ETH', ''));
     const idr = (eth * 50000000).toLocaleString('id-ID');
     return {
       eth: `${eth} ETH`,
       idr: `≈ Rp ${idr}`
     };
-  };
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -227,7 +222,7 @@ const Marketplace = () => {
                 <span className="text-white font-bold text-xl">⟠</span>
               </div>
               <div>
-                <h3 className="font-bold text-gray-800">Real Blockchain Payment</h3>
+                <h3 className="font-bold text-gray-800">Pembayaran Blockchain Nyata</h3>
                 <p className="text-gray-600 text-sm">Pembayaran ETH langsung ke smart contract escrow</p>
               </div>
             </div>
@@ -239,7 +234,7 @@ const Marketplace = () => {
                 </svg>
               </div>
               <div>
-                <h3 className="font-bold text-gray-800">Multi-Network Support</h3>
+                <h3 className="font-bold text-gray-800">Dukungan Multi-Jaringan</h3>
                 <p className="text-gray-600 text-sm">Ethereum, Sepolia Testnet, Polygon</p>
               </div>
             </div>
@@ -251,7 +246,7 @@ const Marketplace = () => {
                 </svg>
               </div>
               <div>
-                <h3 className="font-bold text-gray-800">Verified on Explorer</h3>
+                <h3 className="font-bold text-gray-800">Terverifikasi di Explorer</h3>
                 <p className="text-gray-600 text-sm">Semua transaksi dapat diverifikasi di Etherscan</p>
               </div>
             </div>
@@ -355,7 +350,7 @@ const Marketplace = () => {
 
                       {/* Seller Info */}
                       <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-                        <p className="text-xs text-gray-500 mb-1">Seller</p>
+                        <p className="text-xs text-gray-500 mb-1">Penjual</p>
                         <div className="flex items-center gap-2">
                           <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
                             <span className="text-white text-xs font-bold">
@@ -374,7 +369,7 @@ const Marketplace = () => {
 
                       {/* Payment Methods */}
                       <div className="mb-4">
-                        <p className="text-xs text-gray-500 mb-2">Payment Options</p>
+                        <p className="text-xs text-gray-500 mb-2">Opsi Pembayaran</p>
                         <div className="flex flex-wrap gap-1">
                           <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">⟠ ETH</span>
                           <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs rounded-full">🔷 Polygon</span>
@@ -384,7 +379,7 @@ const Marketplace = () => {
 
                       <div className="flex justify-between items-center">
                         <div className="text-xs text-gray-500">
-                          <span>🔒 Escrow Protected</span>
+                          <span>🔒 Dilindungi Escrow</span>
                         </div>
                         <button
                           onClick={() => handleBuyClick(account)}
@@ -394,7 +389,7 @@ const Marketplace = () => {
                               : 'bg-gray-400 text-white cursor-not-allowed'
                           }`}
                         >
-                          {isAuthenticated ? '⟠ Pay with ETH' : 'Login to Buy'}
+                          {isAuthenticated ? '⟠ Bayar dengan ETH' : 'Login untuk Beli'}
                         </button>
                       </div>
                     </div>
@@ -405,7 +400,7 @@ const Marketplace = () => {
               <div className="col-span-3 text-center py-12">
                 <div className="bg-white rounded-2xl shadow-lg p-12 max-w-md mx-auto">
                   <div className="text-6xl mb-6">🎮</div>
-                  <h3 className="text-xl font-bold text-gray-800 mb-2">No Accounts Available</h3>
+                  <h3 className="text-xl font-bold text-gray-800 mb-2">Tidak Ada Akun Tersedia</h3>
                   <p className="text-gray-500 mb-6">
                     Tidak ada akun yang tersedia untuk game ini saat ini.
                   </p>
@@ -413,7 +408,7 @@ const Marketplace = () => {
                     onClick={() => handleGameFilter(0)}
                     className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
                   >
-                    View All Games
+                    Lihat Semua Game
                   </button>
                 </div>
               </div>
@@ -445,34 +440,49 @@ const Marketplace = () => {
         />
       )}
 
+      {/* Account Detail Modal */}
+      {showAccountDetail && detailAccount && (
+        <AccountDetailModal
+          account={detailAccount}
+          gameList={gameList}
+          formatPriceDisplay={formatPriceDisplay}
+          isAuthenticated={isAuthenticated}
+          onClose={() => {
+            setShowAccountDetail(false);
+            setDetailAccount(null);
+          }}
+          onBuy={handleBuyClick}
+        />
+      )}
+
       {/* Info Section */}
       <section className="py-16 bg-gray-100">
         <div className="max-w-7xl mx-auto px-4">
           <div className="text-center mb-12">
-            <h3 className="text-3xl font-bold text-gray-900 mb-4">Blockchain Payment Advantage</h3>
+            <h3 className="text-3xl font-bold text-gray-900 mb-4">Keuntungan Pembayaran Blockchain</h3>
             <p className="text-gray-600 max-w-2xl mx-auto">
               Transaksi langsung menggunakan blockchain untuk keamanan dan transparansi maksimal
             </p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-8">
-            {/* Feature 1 */}
+            {/* Fitur 1 */}
             <div className="bg-white rounded-xl shadow-lg p-6 text-center">
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <span className="text-3xl">⟠</span>
               </div>
-              <h4 className="text-xl font-semibold text-gray-900 mb-2">Real ETH Payment</h4>
+              <h4 className="text-xl font-semibold text-gray-900 mb-2">Pembayaran ETH Nyata</h4>
               <p className="text-gray-600">
                 Pembayaran menggunakan Ethereum asli, dapat diverifikasi di blockchain explorer
               </p>
               <div className="mt-4 text-sm text-blue-600">
-                <p>✓ MetaMask Integration</p>
-                <p>✓ Multi-Network Support</p>
-                <p>✓ Gas Fee Optimization</p>
+                <p>✓ Integrasi MetaMask</p>
+                <p>✓ Dukungan Multi-Jaringan</p>
+                <p>✓ Optimasi Biaya Gas</p>
               </div>
             </div>
 
-            {/* Feature 2 */}
+            {/* Fitur 2 */}
             <div className="bg-white rounded-xl shadow-lg p-6 text-center">
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-green-600" fill="currentColor" viewBox="0 0 20 20">
@@ -484,34 +494,34 @@ const Marketplace = () => {
                 Dana ditahan di smart contract hingga transaksi dikonfirmasi kedua belah pihak
               </p>
               <div className="mt-4 text-sm text-green-600">
-                <p>✓ Automatic Release</p>
-                <p>✓ Dispute Resolution</p>
-                <p>✓ Zero Counterparty Risk</p>
+                <p>✓ Pelepasan Otomatis</p>
+                <p>✓ Penyelesaian Sengketa</p>
+                <p>✓ Tanpa Risiko Pihak Ketiga</p>
               </div>
             </div>
 
-            {/* Feature 3 */}
+            {/* Fitur 3 */}
             <div className="bg-white rounded-xl shadow-lg p-6 text-center">
               <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
                   <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <h4 className="text-xl font-semibold text-gray-900 mb-2">Full Transparency</h4>
+              <h4 className="text-xl font-semibold text-gray-900 mb-2">Transparansi Penuh</h4>
               <p className="text-gray-600">
                 Semua transaksi tercatat di blockchain dan dapat diverifikasi siapa saja
               </p>
               <div className="mt-4 text-sm text-purple-600">
-                <p>✓ Transaction Hash</p>
-                <p>✓ Block Confirmation</p>
-                <p>✓ Explorer Verification</p>
+                <p>✓ Hash Transaksi</p>
+                <p>✓ Konfirmasi Blok</p>
+                <p>✓ Verifikasi Explorer</p>
               </div>
             </div>
           </div>
 
           {/* Network Support */}
           <div className="mt-12 bg-white rounded-xl shadow-lg p-8">
-            <h4 className="text-xl font-bold text-gray-800 mb-6 text-center">Supported Networks</h4>
+            <h4 className="text-xl font-bold text-gray-800 mb-6 text-center">Jaringan yang Didukung</h4>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="flex items-center gap-4 p-4 border rounded-lg">
                 <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center">
@@ -519,7 +529,7 @@ const Marketplace = () => {
                 </div>
                 <div>
                   <h5 className="font-semibold text-gray-800">Ethereum Mainnet</h5>
-                  <p className="text-sm text-gray-600">Production network dengan ETH asli</p>
+                  <p className="text-sm text-gray-600">Jaringan produksi dengan ETH asli</p>
                   <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded-full">LIVE</span>
                 </div>
               </div>
@@ -530,7 +540,7 @@ const Marketplace = () => {
                 </div>
                 <div>
                   <h5 className="font-semibold text-gray-800">Sepolia Testnet</h5>
-                  <p className="text-sm text-gray-600">Testing network dengan ETH gratis</p>
+                  <p className="text-sm text-gray-600">Jaringan uji dengan ETH gratis</p>
                   <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">TEST</span>
                 </div>
               </div>
@@ -552,7 +562,7 @@ const Marketplace = () => {
 
       <footer className="bg-gray-900 text-white mt-12">
         <div className="max-w-7xl mx-auto px-4 py-12 text-center border-t border-gray-800 text-gray-400">
-          <p>&copy; 2025 GameMarket. All rights reserved. | Powered by Ethereum Blockchain</p>
+          <p>&copy; 2025 GameMarket. Hak cipta dilindungi. | Didukung oleh Ethereum Blockchain</p>
         </div>
       </footer>
     </div>

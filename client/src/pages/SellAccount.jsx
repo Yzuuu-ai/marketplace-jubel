@@ -1,10 +1,9 @@
-// src/pages/SellAccount.jsx - Fixed unused import
+// src/pages/SellAccount.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
 import { useAdmin, ESCROW_STATUS_LABELS, ESCROW_STATUS_COLORS } from '../context/AdminContext';
-// Removed unused import 'ESCROW_STATUS'
 
 const SellAccount = () => {
   const { walletAddress, isAuthenticated } = useAuth();
@@ -126,6 +125,11 @@ const SellAccount = () => {
         throw new Error('Harap isi semua field yang wajib diisi');
       }
       
+      // Get user profile for seller name
+      const userProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
+      const sellerProfile = userProfiles[walletAddress];
+      const sellerName = sellerProfile?.nama || `Seller-${walletAddress.substring(0, 6)}`;
+      
       const existingAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
 
       if (isEditing) {
@@ -140,6 +144,7 @@ const SellAccount = () => {
                 price: `${formData.price} ETH`,
                 description: formData.description,
                 image: formData.image,
+                sellerName: sellerName, // Update seller name
               }
             : acc
         );
@@ -155,7 +160,7 @@ const SellAccount = () => {
           description: formData.description,
           image: formData.image,
           sellerWallet: walletAddress,
-          sellerName: `Seller-${walletAddress.substring(0, 6)}`,
+          sellerName: sellerName, // Use profile name
           createdAt: new Date().toISOString(),
           isSold: false,
           isInEscrow: false,
@@ -476,6 +481,7 @@ const SellAccount = () => {
                       ></textarea>
                     </div>
                     
+                    {/* Updated Seller Info Section */}
                     <div className="mb-6">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Informasi Penjual
@@ -483,14 +489,23 @@ const SellAccount = () => {
                       <div className="bg-gray-50 p-4 rounded-lg">
                         <div className="flex flex-col sm:flex-row gap-4">
                           <div className="w-full sm:w-1/2">
+                            <p className="font-medium text-gray-700 mb-1">Nama Penjual:</p>
+                            <p className="text-gray-700 text-sm">
+                              {(() => {
+                                const profiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
+                                const profile = profiles[walletAddress];
+                                return profile?.nama || `Seller-${walletAddress.substring(0, 6)}`;
+                              })()}
+                            </p>
+                          </div>
+                          <div className="w-full sm:w-1/2">
                             <p className="font-medium text-gray-700 mb-1">Wallet Penjual:</p>
                             <p className="text-gray-700 break-all text-sm">{walletAddress}</p>
                           </div>
-                          <div className="w-full sm:w-1/2">
-                            <p className="font-medium text-gray-700 mb-1">Nama Penjual:</p>
-                            <p className="text-gray-700 text-sm">Seller-{walletAddress.substring(0, 6)}</p>
-                          </div>
                         </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                          * Nama dapat diubah di halaman Profile
+                        </p>
                       </div>
                     </div>
                     

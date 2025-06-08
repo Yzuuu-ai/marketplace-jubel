@@ -1,6 +1,6 @@
 // src/pages/Home.jsx
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
 
@@ -15,20 +15,35 @@ const Home = () => {
   const [featuredGames, setFeaturedGames] = useState([]);
   const [recentAccounts, setRecentAccounts] = useState([]);
   const { isAuthenticated } = useAuth();
+  const navigate = useNavigate();
 
   const getGameAccounts = () => {
     try {
       const savedAccounts = localStorage.getItem('gameAccounts');
-      return savedAccounts ? JSON.parse(savedAccounts) : [];
+      const accounts = savedAccounts ? JSON.parse(savedAccounts) : [];
+      // Filter only available accounts (not sold and not in escrow)
+      return accounts.filter(acc => !acc.isSold && !acc.isInEscrow);
     } catch (error) {
       console.error('Error parsing game accounts:', error);
       return [];
     }
   };
 
+  const getUserProfiles = () => {
+    try {
+      const savedProfiles = localStorage.getItem('userProfiles');
+      return savedProfiles ? JSON.parse(savedProfiles) : {};
+    } catch (error) {
+      console.error('Error parsing user profiles:', error);
+      return {};
+    }
+  };
+
   useEffect(() => {
     const accounts = getGameAccounts();
+    const userProfiles = getUserProfiles();
 
+    // Count available accounts per game
     const gameCounts = gameList.map(game => {
       const count = accounts.filter(acc => acc.gameId === game.id).length;
       return { ...game, accounts: count };
@@ -36,23 +51,64 @@ const Home = () => {
 
     setFeaturedGames(gameCounts);
 
+    // Get recent accounts (max 3)
     const sortedAccounts = [...accounts]
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .slice(0, 3);
 
     const formattedAccounts = sortedAccounts.map(acc => {
       const game = gameList.find(g => g.id === acc.gameId);
+      // Get seller name from user profiles
+      const sellerProfile = userProfiles[acc.sellerWallet];
+      const sellerName = sellerProfile?.nama || acc.sellerName || `Seller-${acc.sellerWallet.substring(0, 6)}`;
+      
       return {
         id: acc.id,
+        title: acc.title,
         game: game ? game.name : 'Unknown Game',
+        gameId: acc.gameId,
+        level: acc.level,
         rank: acc.rank || 'N/A',
         price: acc.price,
-        image: acc.image || (game ? game.image : '/images/games/default.jpg')
+        image: acc.image || (game ? game.image : '/images/games/default.jpg'),
+        sellerName: sellerName,
+        sellerWallet: acc.sellerWallet,
+        description: acc.description
       };
     });
 
     setRecentAccounts(formattedAccounts);
   }, []);
+
+  const handleBuyNow = (account) => {
+    if (!isAuthenticated) {
+      // Redirect to login page
+      navigate('/login');
+    } else {
+      // Navigate to marketplace with account details
+      navigate('/marketplace', { 
+        state: { selectedAccountId: account.id }
+      });
+    }
+  };
+
+  const handleViewAllAccounts = () => {
+    navigate('/marketplace');
+  };
+
+  const handleViewGameAccounts = (gameId) => {
+    navigate(`/marketplace?game=${gameId}`);
+  };
+
+  // Convert ETH price to IDR display
+  const formatPriceDisplay = (ethPrice) => {
+    const eth = parseFloat(ethPrice.replace(' ETH', ''));
+    const idr = (eth * 50000000).toLocaleString('id-ID');
+    return {
+      eth: ethPrice,
+      idr: `Rp ${idr}`
+    };
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -66,9 +122,23 @@ const Home = () => {
               Jual Beli Akun Game
               <span className="block text-yellow-300">Dengan Blockchain</span>
             </h2>
-            <p className="text-xl md:text-2xl text-blue-100">
+            <p className="text-xl md:text-2xl text-blue-100 mb-8">
               Platform terpercaya untuk transaksi akun game menggunakan cryptocurrency
             </p>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <button
+                onClick={() => navigate('/marketplace')}
+                className="bg-white text-blue-600 px-8 py-4 rounded-lg font-bold hover:bg-gray-100 transition transform hover:scale-105"
+              >
+                Jelajahi Marketplace
+              </button>
+              <button
+                onClick={() => navigate(isAuthenticated ? '/sell' : '/login')}
+                className="bg-yellow-400 text-gray-900 px-8 py-4 rounded-lg font-bold hover:bg-yellow-300 transition transform hover:scale-105"
+              >
+                Mulai Jual Akun
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -83,19 +153,19 @@ const Home = () => {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             {featuredGames.map(game => (
-              <div key={game.id} className="bg-white rounded-xl shadow-md hover:shadow-lg transition-shadow">
+              <div key={game.id} className="bg-white rounded-xl shadow-md hover:shadow-lg transition-all transform hover:-translate-y-1">
                 <div className="p-6 text-center">
                   <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center">
                     <img src={game.image} alt={game.name} className="w-full h-full object-cover rounded-lg" />
                   </div>
                   <h4 className="font-semibold text-gray-900 mb-2">{game.name}</h4>
                   <p className="text-sm text-gray-500">{game.accounts} akun tersedia</p>
-                  <Link
-                    to={`/marketplace?game=${game.id}`}
+                  <button
+                    onClick={() => handleViewGameAccounts(game.id)}
                     className="mt-4 inline-block bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
                   >
                     Lihat Akun
-                  </Link>
+                  </button>
                 </div>
               </div>
             ))}
@@ -111,49 +181,104 @@ const Home = () => {
             <p className="text-gray-600">Akun game berkualitas yang baru saja ditambahkan</p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-8">
-            {recentAccounts.map(account => (
-              <div key={account.id} className="bg-white rounded-xl shadow-md hover:shadow-lg transition-shadow">
-                <div className="p-6">
-                  <div className="flex items-center mb-4">
-                    <div className="w-12 h-12 rounded-lg mr-4 flex items-center justify-center">
-                      <img
-                        src={account.image}
-                        alt={account.game}
-                        className="w-full h-full object-cover rounded-lg"
-                      />
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-gray-900">{account.game}</h4>
-                      <p className="text-sm text-gray-500">Rank: {account.rank}</p>
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-2xl font-bold text-blue-600">{account.price}</span>
-                    <button
-                      className={`px-4 py-2 rounded-lg ${
-                        isAuthenticated
-                          ? 'bg-green-600 text-white hover:bg-green-700'
-                          : 'bg-gray-400 text-white cursor-not-allowed'
-                      }`}
-                      disabled={!isAuthenticated}
-                    >
-                      {isAuthenticated ? 'Beli Sekarang' : 'Login untuk Beli'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          {recentAccounts.length > 0 ? (
+            <>
+              <div className="grid md:grid-cols-3 gap-8">
+                {recentAccounts.map(account => {
+                  const priceDisplay = formatPriceDisplay(account.price);
+                  return (
+                    <div key={account.id} className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all transform hover:-translate-y-1">
+                      <div className="p-6">
+                        <div className="flex items-center mb-4">
+                          <div className="w-12 h-12 rounded-lg mr-4 flex items-center justify-center overflow-hidden">
+                            <img
+                              src={account.image}
+                              alt={account.game}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div>
+                            <h4 className="font-semibold text-gray-900">{account.title}</h4>
+                            <p className="text-sm text-gray-500">{account.game}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-2 mb-4">
+                          {account.level && (
+                            <p className="text-sm text-gray-600">
+                              <span className="font-medium">Level:</span> {account.level}
+                            </p>
+                          )}
+                          <p className="text-sm text-gray-600">
+                            <span className="font-medium">Rank:</span> {account.rank}
+                          </p>
+                          {account.description && (
+                            <p className="text-sm text-gray-600 line-clamp-2">
+                              {account.description}
+                            </p>
+                          )}
+                          <p className="text-sm text-gray-600">
+                            <span className="font-medium">Penjual:</span> {account.sellerName}
+                          </p>
+                        </div>
 
-          <div className="text-center mt-8">
-            <Link
-              to="/marketplace"
-              className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition"
-            >
-              Lihat Semua Akun
-            </Link>
-          </div>
+                        <div className="border-t pt-4">
+                          <div className="flex justify-between items-center mb-3">
+                            <div>
+                              <span className="text-2xl font-bold text-blue-600">{priceDisplay.eth}</span>
+                              <p className="text-sm text-gray-500">{priceDisplay.idr}</p>
+                            </div>
+                          </div>
+                          
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleBuyNow(account)}
+                              className={`flex-1 px-4 py-2 rounded-lg font-medium transition ${
+                                isAuthenticated
+                                  ? 'bg-green-600 text-white hover:bg-green-700'
+                                  : 'bg-gray-400 text-white cursor-pointer hover:bg-gray-500'
+                              }`}
+                            >
+                              {isAuthenticated ? 'Beli Sekarang' : 'Login untuk Beli'}
+                            </button>
+                            <button
+                              onClick={() => navigate('/marketplace', { state: { viewAccountId: account.id } })}
+                              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
+                            >
+                              Lihat Detail
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="text-center mt-8">
+                <button
+                  onClick={handleViewAllAccounts}
+                  className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition transform hover:scale-105 font-bold"
+                >
+                  Lihat Semua Akun →
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-12">
+              <div className="bg-white rounded-xl shadow-lg p-8 max-w-md mx-auto">
+                <div className="text-6xl mb-4">📦</div>
+                <h4 className="text-xl font-bold text-gray-800 mb-2">Belum Ada Akun</h4>
+                <p className="text-gray-600 mb-6">Belum ada akun yang dijual saat ini</p>
+                <button
+                  onClick={() => navigate(isAuthenticated ? '/sell' : '/login')}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
+                >
+                  {isAuthenticated ? 'Jual Akun Pertama' : 'Login untuk Menjual'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -210,6 +335,28 @@ const Home = () => {
               <h4 className="text-xl font-semibold text-gray-900 mb-2">Transaksi Cepat</h4>
               <p className="text-gray-600">Proses pembelian dan transfer akun yang mudah dan cepat</p>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* CTA Section */}
+      <section className="py-16 bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+        <div className="max-w-4xl mx-auto px-4 text-center">
+          <h3 className="text-3xl font-bold mb-4">Siap Memulai?</h3>
+          <p className="text-xl mb-8">Bergabunglah dengan ribuan gamer yang telah mempercayai GameMarket</p>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <button
+              onClick={() => navigate('/marketplace')}
+              className="bg-white text-blue-600 px-8 py-3 rounded-lg font-bold hover:bg-gray-100 transition transform hover:scale-105"
+            >
+              Jelajahi Marketplace
+            </button>
+            <button
+              onClick={() => navigate(isAuthenticated ? '/sell' : '/login')}
+              className="border-2 border-white text-white px-8 py-3 rounded-lg font-bold hover:bg-white hover:text-blue-600 transition transform hover:scale-105"
+            >
+              Mulai Menjual
+            </button>
           </div>
         </div>
       </section>
