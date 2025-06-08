@@ -26,6 +26,7 @@ const Marketplace = () => {
   const navigate = useNavigate();
   const queryParams = new URLSearchParams(location.search);
   const gameIdParam = queryParams.get('game');
+  
   const [filteredAccounts, setFilteredAccounts] = useState([]);
   const [selectedGame, setSelectedGame] = useState(gameIdParam ? parseInt(gameIdParam) : 0);
   const { isAuthenticated, walletAddress } = useAuth();
@@ -36,18 +37,18 @@ const Marketplace = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [paymentResult, setPaymentResult] = useState(null);
   
-  // Tambahan state untuk modal detail akun
+  // State untuk modal detail akun
   const [showAccountDetail, setShowAccountDetail] = useState(false);
   const [detailAccount, setDetailAccount] = useState(null);
 
-  // Dapatkan data akun dari localStorage dengan profil penjual
+  // Get game account data with seller profiles
   const getGameAccounts = useCallback(() => {
     try {
       const savedAccounts = localStorage.getItem('gameAccounts');
       const accounts = savedAccounts ? JSON.parse(savedAccounts) : [];
       const userProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
       
-      // Perkaya akun dengan nama profil pengguna
+      // Enhance account data with seller profile names
       return accounts.map(account => {
         const sellerProfile = userProfiles[account.sellerWallet];
         return {
@@ -61,11 +62,11 @@ const Marketplace = () => {
     }
   }, []);
 
-  // Filter akun berdasarkan game yang dipilih
+  // Filter accounts by selected game
   useEffect(() => {
     const allAccounts = getGameAccounts();
     
-    // Filter akun yang sudah terjual atau dalam escrow
+    // Filter out sold or escrowed accounts
     const availableAccounts = allAccounts.filter(account => 
       !account.isSold && !account.isInEscrow
     );
@@ -78,16 +79,19 @@ const Marketplace = () => {
     }
   }, [selectedGame, getGameAccounts]);
 
+  // Set selected game on URL parameter change
   useEffect(() => {
     if (gameIdParam) {
       setSelectedGame(parseInt(gameIdParam));
     }
   }, [gameIdParam]);
 
+  // Handle game filter change
   const handleGameFilter = useCallback((gameId) => {
     setSelectedGame(gameId);
   }, []);
 
+  // Handle buy button click
   const handleBuyClick = useCallback((account) => {
     if (!isAuthenticated) {
       setSuccessMessage('Silakan login terlebih dahulu untuk melakukan pembelian');
@@ -95,7 +99,6 @@ const Marketplace = () => {
       return;
     }
     
-    // Persiapkan data pesanan untuk pembayaran blockchain
     const orderData = {
       id: generateOrderId(),
       accountId: account.id,
@@ -109,26 +112,24 @@ const Marketplace = () => {
       sellerName: account.sellerName,
       buyerWallet: walletAddress,
       priceETH: parseFloat(account.price.replace(' ETH', '')),
-      totalPriceETH: parseFloat(account.price.replace(' ETH', '')), // Bisa tambahkan biaya di sini
-      priceIDR: (parseFloat(account.price.replace(' ETH', '')) * 50000000).toFixed(0), // Konversi ETH ke IDR
+      totalPriceETH: parseFloat(account.price.replace(' ETH', '')),
+      priceIDR: (parseFloat(account.price.replace(' ETH', '')) * 50000000).toFixed(0),
     };
     
     setSelectedAccount(orderData);
     setShowPaymentModal(true);
   }, [isAuthenticated, walletAddress]);
 
-  // Handle navigasi dari halaman Beranda
+  // Handle navigation from the Home page
   useEffect(() => {
     if (location.state) {
       if (location.state.selectedAccountId) {
-        // Cari dan tampilkan akun untuk pembelian
         const allAccounts = getGameAccounts();
         const account = allAccounts.find(acc => acc.id === location.state.selectedAccountId);
         if (account) {
           handleBuyClick(account);
         }
       } else if (location.state.viewAccountId) {
-        // Cari dan tampilkan detail akun
         const allAccounts = getGameAccounts();
         const account = allAccounts.find(acc => acc.id === location.state.viewAccountId);
         if (account) {
@@ -142,16 +143,15 @@ const Marketplace = () => {
           setShowAccountDetail(true);
         }
       }
-      // Bersihkan state untuk mencegah trigger ulang
       window.history.replaceState({}, document.title);
     }
   }, [location.state, handleBuyClick, getGameAccounts]);
 
+  // Handle payment completion
   const handlePaymentComplete = useCallback((paymentData) => {
     try {
       if (!selectedAccount) return;
 
-      // Buat transaksi escrow dengan data pembayaran blockchain
       const escrowData = {
         ...selectedAccount,
         paymentHash: paymentData.transactionHash,
@@ -165,12 +165,7 @@ const Marketplace = () => {
       setShowPaymentModal(false);
       setPaymentResult(paymentData);
       
-      setSuccessMessage(`
-        Pembayaran blockchain berhasil! 
-        ID Escrow: ${escrowTransaction.id}
-        Hash Transaksi: ${paymentData.transactionHash}
-        Seller akan segera diberitahu untuk mengirim detail akun.
-      `);
+      setSuccessMessage(`Pembayaran blockchain berhasil! ID Escrow: ${escrowTransaction.id} Hash Transaksi: ${paymentData.transactionHash}`);
       setShowSuccessModal(true);
       
     } catch (error) {
@@ -180,16 +175,18 @@ const Marketplace = () => {
     }
   }, [selectedAccount, createEscrowTransaction]);
 
+  // Handle payment cancel
   const handlePaymentCancel = useCallback(() => {
     setShowPaymentModal(false);
     setSelectedAccount(null);
   }, []);
 
+  // Navigate to escrow page
   const handleSuccessNavigate = useCallback(() => {
     navigate('/escrow');
   }, [navigate]);
 
-  // Konversi harga untuk ditampilkan dalam ETH dan fiat
+  // Format ETH price to display
   const formatPriceDisplay = useCallback((ethPrice) => {
     const eth = parseFloat(ethPrice.replace(' ETH', ''));
     const idr = (eth * 50000000).toLocaleString('id-ID');
@@ -202,8 +199,7 @@ const Marketplace = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
-
-      {/* Hero */}
+      {/* Hero Section */}
       <section className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-16">
         <div className="max-w-7xl mx-auto px-4 text-center">
           <h1 className="text-4xl md:text-5xl font-bold mb-4">Marketplace Akun Game</h1>
@@ -534,6 +530,7 @@ const Marketplace = () => {
                 </div>
               </div>
               
+            
               <div className="flex items-center gap-4 p-4 border rounded-lg">
                 <div className="w-12 h-12 bg-blue-400 rounded-full flex items-center justify-center">
                   <span className="text-white font-bold">🧪</span>
@@ -545,6 +542,7 @@ const Marketplace = () => {
                 </div>
               </div>
               
+            
               <div className="flex items-center gap-4 p-4 border rounded-lg">
                 <div className="w-12 h-12 bg-purple-600 rounded-full flex items-center justify-center">
                   <span className="text-white font-bold">🔷</span>
