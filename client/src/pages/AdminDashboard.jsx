@@ -1,9 +1,9 @@
-// src/pages/AdminDashboard.jsx - Fixed unused variables and imports
+// src/pages/AdminDashboard.jsx - Complete with Admin Payment Requirements
 import React, { useState, useEffect } from 'react';
 import Header from '../components/Header';
-import { useAdmin, ESCROW_STATUS_LABELS, ESCROW_STATUS_COLORS } from '../context/AdminContext';
+import AdminBlockchainPayment from '../components/AdminBlockchainPayment';
+import { useAdmin, ESCROW_STATUS_LABELS, ESCROW_STATUS_COLORS, ESCROW_STATUS } from '../context/AdminContext';
 import { useAuth } from '../context/AuthContext';
-import AdminPaymentModal from '../components/AdminPaymentModal';
 
 const formatDate = (timestamp) => {
   return new Date(timestamp).toLocaleString('id-ID', {
@@ -20,9 +20,10 @@ const formatETH = (amount) => {
 };
 
 const EscrowTransactionCard = ({ transaction, onAction }) => {
-  const canConfirmPayment = transaction.status === 'pending_payment';
   const canReleaseFunds = transaction.status === 'buyer_confirmed';
   const isDisputed = transaction.status === 'disputed';
+  const isCompleted = transaction.status === 'completed';
+  const isRefunded = transaction.status === 'refunded';
 
   return (
     <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-blue-500">
@@ -61,7 +62,7 @@ const EscrowTransactionCard = ({ transaction, onAction }) => {
 
       {transaction.paymentHash && (
         <div className="mb-4 p-3 bg-blue-50 rounded-lg">
-          <p className="text-sm font-medium text-blue-800">Payment Hash:</p>
+          <p className="text-sm font-medium text-blue-800">Buyer Payment Hash:</p>
           <p className="text-xs font-mono text-blue-600 break-all">{transaction.paymentHash}</p>
         </div>
       )}
@@ -70,8 +71,11 @@ const EscrowTransactionCard = ({ transaction, onAction }) => {
         <div className="mb-4 p-3 bg-green-50 rounded-lg">
           <p className="text-sm font-medium text-green-800">Account Delivered:</p>
           <div className="text-xs text-green-600">
-            <p><strong>Username:</strong> {transaction.deliveryProof.username}</p>
+            <p className="font-medium">✅ Akun telah dikirim ke buyer</p>
             <p><strong>Delivered at:</strong> {formatDate(transaction.deliveryProof.deliveredAt)}</p>
+            <p className="text-xs text-gray-500 mt-1">
+              <em>Detail akun hanya dapat dilihat oleh buyer dan seller</em>
+            </p>
           </div>
         </div>
       )}
@@ -83,30 +87,23 @@ const EscrowTransactionCard = ({ transaction, onAction }) => {
         </div>
       )}
 
+      {/* Show admin payment info if completed or refunded */}
+      {(isCompleted || isRefunded) && transaction.adminPaymentHash && (
+        <div className="mb-4 p-3 bg-purple-50 rounded-lg">
+          <p className="text-sm font-medium text-purple-800">
+            Admin {isRefunded ? 'Refund' : 'Payment'} Hash:
+          </p>
+          <p className="text-xs font-mono text-purple-600 break-all">{transaction.adminPaymentHash}</p>
+        </div>
+      )}
+
       <div className="flex gap-2 flex-wrap">
-        {canConfirmPayment && (
-          <>
-            <button
-              onClick={() => onAction('confirmPayment', transaction)}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm"
-            >
-              Konfirmasi Pembayaran
-            </button>
-            <button
-              onClick={() => onAction('simulatePayment', transaction)}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm"
-            >
-              Simulasi Bayar
-            </button>
-          </>
-        )}
-        
         {canReleaseFunds && (
           <button
             onClick={() => onAction('releaseFunds', transaction)}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm"
           >
-            Release Dana
+            💰 Bayar ke Seller
           </button>
         )}
 
@@ -116,15 +113,21 @@ const EscrowTransactionCard = ({ transaction, onAction }) => {
               onClick={() => onAction('resolveDispute', transaction, { refund: true })}
               className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm"
             >
-              Refund Buyer
+              💸 Refund ke Buyer
             </button>
             <button
               onClick={() => onAction('resolveDispute', transaction, { refund: false })}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm"
             >
-              Release to Seller
+              💰 Bayar ke Seller
             </button>
           </>
+        )}
+
+        {(isCompleted || isRefunded) && (
+          <div className="text-sm text-gray-600">
+            {isCompleted ? '✅ Dana telah dibayar ke seller' : '↩️ Dana telah direfund ke buyer'}
+          </div>
         )}
 
         <button
@@ -144,7 +147,6 @@ const AdminDashboard = () => {
     isAdmin, 
     escrowTransactions, 
     checkAdminStatus,
-    confirmPaymentReceived,
     releaseFunds,
     resolveDispute,
     getAdminStats
@@ -152,8 +154,9 @@ const AdminDashboard = () => {
 
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedTransaction, setSelectedTransaction] = useState(null);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showAdminPaymentModal, setShowAdminPaymentModal] = useState(false);
+  const [adminPaymentAction, setAdminPaymentAction] = useState('');
 
   useEffect(() => {
     if (walletAddress) {
@@ -163,30 +166,24 @@ const AdminDashboard = () => {
 
   const handleAction = (action, transaction, params = {}) => {
     switch (action) {
-      case 'confirmPayment':
-        setSelectedTransaction(transaction);
-        setShowPaymentModal(true);
-        break;
-
-      case 'simulatePayment':
-        // Generate random hash for simulation
-        const simulatedHash = `0x${Math.random().toString(16).substring(2, 66)}`;
-        confirmPaymentReceived(transaction.id, simulatedHash);
-        break;
-
       case 'releaseFunds':
-        if (window.confirm(`Release ${transaction.priceETH} ETH to seller ${transaction.sellerWallet}?`)) {
-          releaseFunds(transaction.id);
-        }
+        // Show payment modal for admin to pay seller
+        setSelectedTransaction(transaction);
+        setAdminPaymentAction('release');
+        setShowAdminPaymentModal(true);
         break;
 
       case 'resolveDispute':
-        const resolution = params.refund 
-          ? 'Refunded to buyer due to valid dispute' 
-          : 'Released to seller - dispute resolved in favor of seller';
-        
-        if (window.confirm(`${params.refund ? 'Refund to buyer' : 'Release to seller'}?`)) {
-          resolveDispute(transaction.disputeId, resolution, params.refund);
+        if (params.refund) {
+          // Show payment modal for refund to buyer
+          setSelectedTransaction(transaction);
+          setAdminPaymentAction('refund');
+          setShowAdminPaymentModal(true);
+        } else {
+          // Show payment modal for release to seller
+          setSelectedTransaction(transaction);
+          setAdminPaymentAction('release');
+          setShowAdminPaymentModal(true);
         }
         break;
 
@@ -200,12 +197,23 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleConfirmPayment = (paymentHash) => {
-    if (selectedTransaction) {
-      confirmPaymentReceived(selectedTransaction.id, paymentHash);
-      setShowPaymentModal(false);
-      setSelectedTransaction(null);
+  const handleAdminPayment = (paymentData) => {
+    if (!selectedTransaction) return;
+
+    const { transactionHash, action } = paymentData;
+
+    if (action === 'release') {
+      // Release funds to seller
+      releaseFunds(selectedTransaction.id, transactionHash);
+    } else if (action === 'refund') {
+      // Refund to buyer
+      const resolution = 'Refunded to buyer due to valid dispute';
+      resolveDispute(selectedTransaction.disputeId || selectedTransaction.id, resolution, true, transactionHash);
     }
+
+    setShowAdminPaymentModal(false);
+    setSelectedTransaction(null);
+    setAdminPaymentAction('');
   };
 
   const stats = getAdminStats();
@@ -431,8 +439,8 @@ const AdminDashboard = () => {
               <h4 className="font-semibold mb-2">Fund Release:</h4>
               <ul className="space-y-1">
                 <li>• Wait for buyer confirmation</li>
-                <li>• Check delivery proof</li>
-                <li>• Release funds to seller</li>
+                <li>• Transfer ETH to seller</li>
+                <li>• Input payment hash</li>
                 <li>• Auto-release after 24h</li>
               </ul>
             </div>
@@ -442,7 +450,7 @@ const AdminDashboard = () => {
                 <li>• Review dispute reason</li>
                 <li>• Check evidence from both parties</li>
                 <li>• Decide fair resolution</li>
-                <li>• Refund or release accordingly</li>
+                <li>• Refund buyer or release to seller</li>
               </ul>
             </div>
           </div>
@@ -453,17 +461,6 @@ const AdminDashboard = () => {
       </div>
 
       {/* Modals */}
-      {showPaymentModal && selectedTransaction && (
-        <ConfirmPaymentModal
-          transaction={selectedTransaction}
-          onClose={() => {
-            setShowPaymentModal(false);
-            setSelectedTransaction(null);
-          }}
-          onConfirm={handleConfirmPayment}
-        />
-      )}
-
       {showDetailModal && selectedTransaction && (
         <TransactionDetailModal
           transaction={selectedTransaction}
@@ -473,64 +470,19 @@ const AdminDashboard = () => {
           }}
         />
       )}
-    </div>
-  );
-};
 
-// ConfirmPaymentModal component
-const ConfirmPaymentModal = ({ transaction, onClose, onConfirm }) => {
-  const [paymentHash, setPaymentHash] = useState('');
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (paymentHash.trim()) {
-      onConfirm(paymentHash.trim());
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">Konfirmasi Pembayaran</h2>
-        
-        <div className="mb-4">
-          <p className="text-sm text-gray-600 mb-2">Transaksi: {transaction.accountTitle}</p>
-          <p className="text-sm text-gray-600 mb-2">Jumlah: {transaction.priceETH} ETH</p>
-          <p className="text-sm text-gray-600">Pembeli: {transaction.buyerWallet}</p>
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Transaction Hash
-            </label>
-            <input
-              type="text"
-              value={paymentHash}
-              onChange={(e) => setPaymentHash(e.target.value)}
-              placeholder="0x..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-          </div>
-
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
-            >
-              Batal
-            </button>
-            <button
-              type="submit"
-              className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
-            >
-              Konfirmasi
-            </button>
-          </div>
-        </form>
-      </div>
+      {showAdminPaymentModal && selectedTransaction && (
+        <AdminBlockchainPayment
+          transaction={selectedTransaction}
+          action={adminPaymentAction}
+          onPaymentComplete={handleAdminPayment}
+          onCancel={() => {
+            setShowAdminPaymentModal(false);
+            setSelectedTransaction(null);
+            setAdminPaymentAction('');
+          }}
+        />
+      )}
     </div>
   );
 };
@@ -643,7 +595,7 @@ const TransactionDetailModal = ({ transaction, onClose }) => {
           </div>
 
           {/* Additional Info */}
-          {(transaction.paymentHash || transaction.deliveryProof || transaction.disputeReason) && (
+          {(transaction.paymentHash || transaction.deliveryProof || transaction.disputeReason || transaction.adminPaymentHash) && (
             <div className="space-y-4">
               {transaction.paymentHash && (
                 <div className="bg-blue-50 p-4 rounded-lg">
@@ -656,11 +608,13 @@ const TransactionDetailModal = ({ transaction, onClose }) => {
                 <div className="bg-green-50 p-4 rounded-lg">
                   <h3 className="font-semibold text-green-800 mb-2">Account Delivery</h3>
                   <div className="text-sm text-green-700">
-                    <p><strong>Username:</strong> {transaction.deliveryProof.username}</p>
-                    <p><strong>Password:</strong> {transaction.deliveryProof.password}</p>
-                    {transaction.deliveryProof.notes && (
-                      <p><strong>Notes:</strong> {transaction.deliveryProof.notes}</p>
-                    )}
+                    <p><strong>Status:</strong> ✅ Akun telah dikirim ke buyer</p>
+                    <p><strong>Delivered at:</strong> {formatDate(transaction.deliveryProof.deliveredAt)}</p>
+                    <div className="mt-2 p-2 bg-green-100 rounded">
+                      <p className="text-xs text-green-800">
+                        <em>⚠️ Detail akun (username/password) hanya dapat dilihat oleh buyer dan seller untuk keamanan</em>
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
@@ -669,6 +623,16 @@ const TransactionDetailModal = ({ transaction, onClose }) => {
                 <div className="bg-red-50 p-4 rounded-lg">
                   <h3 className="font-semibold text-red-800 mb-2">Dispute</h3>
                   <p className="text-sm text-red-700">{transaction.disputeReason}</p>
+                </div>
+              )}
+
+              {transaction.adminPaymentHash && (
+                <div className="bg-purple-50 p-4 rounded-lg">
+                  <h3 className="font-semibold text-purple-800 mb-2">Admin Payment</h3>
+                  <p className="text-sm text-purple-700">
+                    {transaction.status === ESCROW_STATUS.COMPLETED ? 'Payment to Seller:' : 'Refund to Buyer:'}
+                  </p>
+                  <p className="font-mono text-xs break-all text-purple-600">{transaction.adminPaymentHash}</p>
                 </div>
               )}
             </div>

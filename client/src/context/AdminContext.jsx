@@ -1,4 +1,4 @@
-// src/context/AdminContext.jsx - Updated dengan admin wallet Anda
+// src/context/AdminContext.jsx - Updated dengan admin wallet dan payment hash
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 const AdminContext = createContext();
@@ -171,13 +171,14 @@ const AdminProvider = ({ children }) => {
       ]
     };
 
-    // If payment hash exists, automatically mark as payment received for demo
+    // If payment hash exists, automatically confirm payment
     if (orderData.paymentHash) {
       escrowTransaction.status = ESCROW_STATUS.PAYMENT_RECEIVED;
+      escrowTransaction.paymentHash = orderData.paymentHash;
       escrowTransaction.timeline.push({
         status: ESCROW_STATUS.PAYMENT_RECEIVED,
         timestamp: Date.now() + 1000,
-        note: 'Blockchain payment detected and confirmed'
+        note: `Payment received to escrow wallet. Hash: ${orderData.paymentHash}`
       });
     }
 
@@ -313,7 +314,7 @@ const AdminProvider = ({ children }) => {
     console.log('⚠️ Dispute created for escrow:', escrowId);
   };
 
-  const releaseFunds = (escrowId) => {
+  const releaseFunds = (escrowId, adminPaymentHash) => {
     const transactions = JSON.parse(localStorage.getItem('escrowTransactions') || '[]');
     const updatedTransactions = transactions.map(tx => {
       if (tx.id === escrowId) {
@@ -321,12 +322,13 @@ const AdminProvider = ({ children }) => {
           ...tx,
           status: ESCROW_STATUS.COMPLETED,
           releasedAt: Date.now(),
+          adminPaymentHash: adminPaymentHash, // Track admin's payment to seller
           timeline: [
             ...tx.timeline,
             {
               status: ESCROW_STATUS.COMPLETED,
               timestamp: Date.now(),
-              note: 'Funds released to seller by admin'
+              note: `Funds released to seller by admin. Payment hash: ${adminPaymentHash}`
             }
           ]
         };
@@ -357,22 +359,23 @@ const AdminProvider = ({ children }) => {
     console.log('💰 Funds released for escrow:', escrowId);
   };
 
-  const resolveDispute = (disputeId, resolution, refund = false) => {
+  const resolveDispute = (disputeId, resolution, refund = false, adminPaymentHash = null) => {
     const transactions = JSON.parse(localStorage.getItem('escrowTransactions') || '[]');
     const updatedTransactions = transactions.map(tx => {
-      if (tx.disputeId === disputeId) {
+      if (tx.disputeId === disputeId || tx.id === disputeId) {
         const newStatus = refund ? ESCROW_STATUS.REFUNDED : ESCROW_STATUS.COMPLETED;
         const resolvedTx = {
           ...tx,
           status: newStatus,
           disputeResolution: resolution,
           resolvedAt: Date.now(),
+          adminPaymentHash: adminPaymentHash, // Track admin's payment
           timeline: [
             ...tx.timeline,
             {
               status: newStatus,
               timestamp: Date.now(),
-              note: `Dispute resolved: ${resolution}`
+              note: `Dispute resolved: ${resolution}${adminPaymentHash ? `. Payment hash: ${adminPaymentHash}` : ''}`
             }
           ]
         };
