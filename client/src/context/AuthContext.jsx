@@ -8,12 +8,14 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionMethod, setConnectionMethod] = useState(null); // 'auto' or 'manual'
+  const [profileData, setProfileData] = useState({ nama: '', email: '', nomor: '' }); // Add profile data
 
   const handleDisconnection = useCallback(() => {
     setWalletAddress('');
     setIsAuthenticated(false);
     setConnectionMethod(null);
     setIsConnecting(false);
+    setProfileData({ nama: '', email: '', nomor: '' }); // Reset profile data on disconnection
   }, []);
 
   const setupAccountChangeListener = useCallback(() => {
@@ -137,16 +139,25 @@ export const AuthProvider = ({ children }) => {
     return localStorage.getItem('walletManuallyDisconnected') === 'true';
   };
 
+  // Function to update profile data
+  const updateProfileData = (newProfileData) => {
+    setProfileData(newProfileData);
+    // Optionally store it in localStorage
+    localStorage.setItem('userProfile', JSON.stringify(newProfileData));
+  };
+
   const value = {
     walletAddress,
     isAuthenticated,
     isConnecting,
     connectionMethod,
+    profileData,
     login,
     logout,
     forceDisconnect,
     reconnect,
     wasManuallyDisconnected,
+    updateProfileData, // Expose the function to update profile
   };
 
   return (
