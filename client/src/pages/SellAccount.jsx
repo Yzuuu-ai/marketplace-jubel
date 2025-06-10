@@ -19,13 +19,15 @@ const SellAccount = () => {
     rank: '',
     price: '',
     description: '',
-    image: '/images/games/default.jpg'
+    images: [], // Changed to array for multiple images
+    contactType: 'whatsapp', // Default contact type
+    contactValue: '' // Single contact value
   });
   const [games, setGames] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-  const [previewImage, setPreviewImage] = useState('');
+  const [previewImages, setPreviewImages] = useState([]); // Array for multiple previews
   const [myListings, setMyListings] = useState([]);
   const [filterStatus, setFilterStatus] = useState('all');
 
@@ -97,22 +99,50 @@ const SellAccount = () => {
     if (name === 'gameId' && value) {
       const selectedGame = games.find(g => g.id === parseInt(value));
       newFormData.title = generateAccountTitle(value);
-      newFormData.image = selectedGame?.image || '/images/games/default.jpg';
-      setPreviewImage(selectedGame?.image || '/images/games/default.jpg');
+      // Set default image if no images uploaded
+      if (newFormData.images.length === 0) {
+        newFormData.images = [selectedGame?.image || '/images/games/default.jpg'];
+        setPreviewImages([selectedGame?.image || '/images/games/default.jpg']);
+      }
     }
     setFormData(newFormData);
   };
 
   const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
+    const files = Array.from(e.target.files);
+    const maxImages = 5; // Maximum 5 images
+    
+    if (files.length + formData.images.length > maxImages) {
+      alert(`Maksimal ${maxImages} gambar yang dapat diunggah`);
+      return;
+    }
+
+    const newImages = [];
+    const newPreviews = [];
+
+    files.forEach(file => {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setFormData(prev => ({ ...prev, image: reader.result }));
-        setPreviewImage(reader.result);
+        newImages.push(reader.result);
+        newPreviews.push(reader.result);
+        
+        if (newImages.length === files.length) {
+          setFormData(prev => ({ 
+            ...prev, 
+            images: [...prev.images, ...newImages] 
+          }));
+          setPreviewImages(prev => [...prev, ...newPreviews]);
+        }
       };
       reader.readAsDataURL(file);
-    }
+    });
+  };
+
+  const removeImage = (index) => {
+    const newImages = formData.images.filter((_, i) => i !== index);
+    const newPreviews = previewImages.filter((_, i) => i !== index);
+    setFormData(prev => ({ ...prev, images: newImages }));
+    setPreviewImages(newPreviews);
   };
 
   const handleSubmit = (e) => {
@@ -124,6 +154,10 @@ const SellAccount = () => {
       if (!formData.gameId || !formData.title || !formData.price) {
         throw new Error('Harap isi semua field yang wajib diisi');
       }
+
+      if (!formData.contactValue.trim()) {
+        throw new Error('Harap isi informasi kontak');
+      }
       
       // Get user profile for seller name
       const userProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
@@ -131,6 +165,9 @@ const SellAccount = () => {
       const sellerName = sellerProfile?.nama || `Seller-${walletAddress.substring(0, 6)}`;
       
       const existingAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
+
+      // Use first image as main image, or default
+      const mainImage = formData.images.length > 0 ? formData.images[0] : '/images/games/default.jpg';
 
       if (isEditing) {
         const updatedAccounts = existingAccounts.map(acc =>
@@ -143,8 +180,11 @@ const SellAccount = () => {
                 rank: formData.rank,
                 price: `${formData.price} ETH`,
                 description: formData.description,
-                image: formData.image,
-                sellerName: sellerName, // Update seller name
+                image: mainImage,
+                images: formData.images,
+                sellerName: sellerName,
+                contactType: formData.contactType,
+                contactValue: formData.contactValue
               }
             : acc
         );
@@ -158,9 +198,12 @@ const SellAccount = () => {
           rank: formData.rank,
           price: `${formData.price} ETH`,
           description: formData.description,
-          image: formData.image,
+          image: mainImage,
+          images: formData.images,
           sellerWallet: walletAddress,
-          sellerName: sellerName, // Use profile name
+          sellerName: sellerName,
+          contactType: formData.contactType,
+          contactValue: formData.contactValue,
           createdAt: new Date().toISOString(),
           isSold: false,
           isInEscrow: false,
@@ -179,9 +222,11 @@ const SellAccount = () => {
         rank: '',
         price: '',
         description: '',
-        image: '/images/games/default.jpg'
+        images: [],
+        contactType: 'whatsapp',
+        contactValue: ''
       });
-      setPreviewImage('');
+      setPreviewImages([]);
       setIsEditing(false);
       setEditingAccountId(null);
 
@@ -222,16 +267,40 @@ const SellAccount = () => {
       return;
     }
 
+    // Handle old data format (with whatsapp, instagram, telegram fields)
+    let contactType = 'whatsapp';
+    let contactValue = '';
+    
+    if (account.contactType && account.contactValue) {
+      // New format
+      contactType = account.contactType;
+      contactValue = account.contactValue;
+    } else {
+      // Old format - get the first available contact
+      if (account.whatsapp) {
+        contactType = 'whatsapp';
+        contactValue = account.whatsapp;
+      } else if (account.instagram) {
+        contactType = 'instagram';
+        contactValue = account.instagram;
+      } else if (account.telegram) {
+        contactType = 'telegram';
+        contactValue = account.telegram;
+      }
+    }
+
     setFormData({
       gameId: account.gameId.toString(),
       title: account.title,
-      level: account.level,
-      rank: account.rank,
+      level: account.level || '',
+      rank: account.rank || '',
       price: account.price.replace(' ETH', ''),
-      description: account.description,
-      image: account.image
+      description: account.description || '',
+      images: account.images || [account.image] || [],
+      contactType: contactType,
+      contactValue: contactValue
     });
-    setPreviewImage(account.image);
+    setPreviewImages(account.images || [account.image] || []);
     setIsEditing(true);
     setEditingAccountId(account.id);
     setActiveTab('sell');
@@ -261,20 +330,43 @@ const SellAccount = () => {
     );
   };
 
+  const getContactDisplay = (account) => {
+    if (account.contactType && account.contactValue) {
+      const icons = {
+        whatsapp: '📱',
+        instagram: '📷',
+        telegram: '✈️'
+      };
+      const labels = {
+        whatsapp: 'WA',
+        instagram: 'IG',
+        telegram: 'TG'
+      };
+      return `${icons[account.contactType]} ${labels[account.contactType]}: ${account.contactValue}`;
+    }
+    
+    // Handle old format
+    if (account.whatsapp) return `📱 WA: ${account.whatsapp}`;
+    if (account.instagram) return `📷 IG: ${account.instagram}`;
+    if (account.telegram) return `✈️ TG: ${account.telegram}`;
+    
+    return null;
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
       
-      <section className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-16">
+      <section className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center">
-            <h1 className="text-3xl md:text-4xl font-bold mb-4">
-              {isEditing ? 'Edit Akun Game Anda' : 'Jual Akun Game Anda'}
+            <h1 className="text-3xl font-bold mb-2">
+              {isEditing ? 'Edit Akun Game' : 'Jual Akun Game'}
             </h1>
-            <p className="text-lg max-w-2xl mx-auto">
+            <p className="text-lg">
               {isEditing
-                ? 'Perbarui informasi akun yang terdaftar'
-                : 'Dapatkan keuntungan dari akun game yang tidak lagi Anda gunakan'}
+                ? 'Perbarui informasi akun Anda'
+                : 'Jual akun game dengan mudah dan aman'}
             </p>
           </div>
         </div>
@@ -294,9 +386,11 @@ const SellAccount = () => {
                 rank: '',
                 price: '',
                 description: '',
-                image: '/images/games/default.jpg'
+                images: [],
+                contactType: 'whatsapp',
+                contactValue: ''
               });
-              setPreviewImage('');
+              setPreviewImages([]);
             }}
             className={`px-4 py-2 rounded-lg font-medium transition ${activeTab === 'sell' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
           >
@@ -312,9 +406,9 @@ const SellAccount = () => {
       </section>
 
       {activeTab === 'sell' ? (
-        <section className="py-12">
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="bg-white rounded-xl shadow-md p-6 md:p-8">
+        <section className="py-8">
+          <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="bg-white rounded-xl shadow-md p-6">
               {success ? (
                 <div className="text-center py-8">
                   <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 mb-4">
@@ -325,16 +419,15 @@ const SellAccount = () => {
                   <h2 className="text-2xl font-bold text-gray-900 mb-2">
                     {isEditing ? 'Akun Berhasil Diedit!' : 'Akun Berhasil Dijual!'}
                   </h2>
-                  <p className="text-gray-600 mb-6">
+                  <p className="text-gray-600">
                     {isEditing
                       ? 'Informasi akun telah diperbarui.'
                       : 'Akun Anda sekarang tersedia di marketplace'}
                   </p>
-                  <p className="text-gray-500">Anda akan diarahkan ke daftar akun...</p>
                 </div>
               ) : (
                 <>
-                  <h2 className="text-2xl font-bold text-gray-900 mb-6">Detail Akun Game</h2>
+                  <h2 className="text-xl font-bold text-gray-900 mb-6">Detail Akun Game</h2>
                   
                   {error && (
                     <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-lg">
@@ -343,40 +436,52 @@ const SellAccount = () => {
                   )}
                   
                   <form onSubmit={handleSubmit}>
+                    {/* Image Upload Section */}
                     <div className="mb-6">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Gambar Akun
+                        Gambar Akun <span className="text-gray-500">(Maks. 5 gambar)</span>
                       </label>
-                      <div className="flex items-center gap-4">
-                        <div className="w-24 h-24 rounded-lg overflow-hidden border border-gray-300">
-                          <img 
-                            src={previewImage || formData.image} 
-                            alt="Preview" 
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                        <div>
-                          <input
-                            type="file"
-                            id="imageUpload"
-                            accept="image/*"
-                            onChange={handleImageUpload}
-                            className="hidden"
-                          />
-                          <label
-                            htmlFor="imageUpload"
-                            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg cursor-pointer hover:bg-gray-200 transition"
-                          >
-                            Unggah Gambar
+                      
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        {previewImages.map((image, index) => (
+                          <div key={index} className="relative group">
+                            <img
+                              src={image}
+                              alt={`Preview ${index + 1}`}
+                              className="w-full h-24 object-cover rounded-lg border border-gray-300"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeImage(index)}
+                              className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        ))}
+                        
+                        {previewImages.length < 5 && (
+                          <label className="border-2 border-dashed border-gray-300 rounded-lg p-4 flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 transition">
+                            <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                            <span className="text-xs text-gray-500 mt-1">Tambah</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              onChange={handleImageUpload}
+                              className="hidden"
+                            />
                           </label>
-                          <p className="text-xs text-gray-500 mt-1">
-                            Format: JPG, PNG (Maks. 2MB)
-                          </p>
-                        </div>
+                        )}
                       </div>
                     </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+
+                    {/* Basic Information */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                       <div>
                         <label htmlFor="gameId" className="block text-sm font-medium text-gray-700 mb-1">
                           Pilih Game <span className="text-red-500">*</span>
@@ -399,8 +504,29 @@ const SellAccount = () => {
                       </div>
                       
                       <div>
+                        <label htmlFor="price" className="block text-sm font-medium text-gray-700 mb-1">
+                          Harga (ETH) <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          id="price"
+                          name="price"
+                          value={formData.price}
+                          onChange={handleChange}
+                          placeholder="0.05"
+                          step="0.001"
+                          min="0.001"
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                          required
+                        />
+                      </div>
+                    </div>
+                    
+                    {/* Game Details */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                      <div>
                         <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
-                          Judul Akun <span className="text-red-500">*</span>
+                          Kode Akun
                         </label>
                         <input
                           type="text"
@@ -408,18 +534,14 @@ const SellAccount = () => {
                           name="title"
                           value={formData.title}
                           onChange={handleChange}
-                          placeholder="Contoh: ML-001"
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-gray-50"
-                          required
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50"
                           readOnly
                         />
                       </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                      
                       <div>
                         <label htmlFor="level" className="block text-sm font-medium text-gray-700 mb-1">
-                          Level Akun
+                          Level
                         </label>
                         <input
                           type="number"
@@ -427,14 +549,14 @@ const SellAccount = () => {
                           name="level"
                           value={formData.level}
                           onChange={handleChange}
-                          placeholder="Contoh: 30"
+                          placeholder="30"
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
                         />
                       </div>
                       
                       <div>
                         <label htmlFor="rank" className="block text-sm font-medium text-gray-700 mb-1">
-                          Rank Akun
+                          Rank
                         </label>
                         <input
                           type="text"
@@ -442,71 +564,76 @@ const SellAccount = () => {
                           name="rank"
                           value={formData.rank}
                           onChange={handleChange}
-                          placeholder="Contoh: Mythic Glory"
+                          placeholder="Mythic"
                           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
                         />
                       </div>
                     </div>
                     
-                    <div className="mb-6">
-                      <label htmlFor="price" className="block text-sm font-medium text-gray-700 mb-1">
-                        Harga (ETH) <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        id="price"
-                        name="price"
-                        value={formData.price}
-                        onChange={handleChange}
-                        placeholder="Contoh: 0.05"
-                        step="0.001"
-                        min="0.001"
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                        required
-                      />
-                    </div>
-                    
+                    {/* Description */}
                     <div className="mb-6">
                       <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
-                        Deskripsi Akun
+                        Deskripsi
                       </label>
                       <textarea
                         id="description"
                         name="description"
                         value={formData.description}
                         onChange={handleChange}
-                        rows={4}
-                        placeholder="Deskripsikan detail akun, skin, hero, item, dll."
+                        rows={3}
+                        placeholder="Deskripsikan akun Anda (skin, hero, item, dll)"
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
                       ></textarea>
                     </div>
                     
-                    {/* Updated Seller Info Section */}
-                    <div className="mb-6">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Informasi Penjual
-                      </label>
-                      <div className="bg-gray-50 p-4 rounded-lg">
-                        <div className="flex flex-col sm:flex-row gap-4">
-                          <div className="w-full sm:w-1/2">
-                            <p className="font-medium text-gray-700 mb-1">Nama Penjual:</p>
-                            <p className="text-gray-700 text-sm">
-                              {(() => {
-                                const profiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
-                                const profile = profiles[walletAddress];
-                                return profile?.nama || `Seller-${walletAddress.substring(0, 6)}`;
-                              })()}
-                            </p>
-                          </div>
-                          <div className="w-full sm:w-1/2">
-                            <p className="font-medium text-gray-700 mb-1">Wallet Penjual:</p>
-                            <p className="text-gray-700 break-all text-sm">{walletAddress}</p>
-                          </div>
+                    {/* Contact Information */}
+                    <div className="mb-6 bg-blue-50 p-4 rounded-lg">
+                      <h3 className="text-sm font-medium text-gray-700 mb-3">
+                        Informasi Kontak <span className="text-red-500">*</span>
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label htmlFor="contactType" className="block text-sm text-gray-600 mb-1">
+                            Pilih Platform
+                          </label>
+                          <select
+                            id="contactType"
+                            name="contactType"
+                            value={formData.contactType}
+                            onChange={handleChange}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                          >
+                            <option value="whatsapp">WhatsApp</option>
+                            <option value="instagram">Instagram</option>
+                            <option value="telegram">Telegram</option>
+                          </select>
                         </div>
-                        <p className="text-xs text-gray-500 mt-2">
-                          * Nama dapat diubah di halaman Profile
-                        </p>
+                        
+                        <div>
+                          <label htmlFor="contactValue" className="block text-sm text-gray-600 mb-1">
+                            {formData.contactType === 'whatsapp' ? 'Nomor WhatsApp' :
+                             formData.contactType === 'instagram' ? 'Username Instagram' :
+                             'Username Telegram'}
+                          </label>
+                          <input
+                            type="text"
+                            id="contactValue"
+                            name="contactValue"
+                            value={formData.contactValue}
+                            onChange={handleChange}
+                            placeholder={
+                              formData.contactType === 'whatsapp' ? '628123456789' :
+                              formData.contactType === 'instagram' ? '@username' :
+                              '@username'
+                            }
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+                            required
+                          />
+                        </div>
                       </div>
+                      <p className="text-xs text-gray-500 mt-2">
+                        * Kontak akan ditampilkan kepada pembeli untuk memudahkan komunikasi
+                      </p>
                     </div>
                     
                     <div className="flex justify-end">
@@ -515,102 +642,61 @@ const SellAccount = () => {
                         disabled={submitting}
                         className={`px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition ${submitting ? 'opacity-75 cursor-not-allowed' : ''}`}
                       >
-                        {submitting ? 'Menyimpan...' : isEditing ? 'Simpan Perubahan' : 'Jual Akun Sekarang'}
+                        {submitting ? 'Menyimpan...' : isEditing ? 'Simpan Perubahan' : 'Jual Akun'}
                       </button>
                     </div>
                   </form>
                 </>
               )}
             </div>
-            
-            <div className="mt-8 bg-blue-50 p-6 rounded-xl">
-              <h3 className="text-lg font-semibold text-blue-800 mb-3">Tips Menjual Akun</h3>
-              <ul className="space-y-3 text-blue-700">
-                <li className="flex items-start">
-                  <span className="mr-2">•</span>
-                  <span className="text-left">Berikan deskripsi yang jelas dan jujur tentang kondisi akun</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="mr-2">•</span>
-                  <span className="text-left">Harga yang wajar akan membuat akun Anda lebih cepat terjual</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="mr-2">•</span>
-                  <span className="text-left">Pastikan Anda tidak lagi menggunakan akun yang dijual</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="mr-2">•</span>
-                  <span className="text-left">Transaksi aman melalui sistem escrow blockchain kami</span>
-                </li>
-                <li className="flex items-start">
-                  <span className="mr-2">•</span>
-                  <span className="text-left">Dana akan dirilis setelah pembeli konfirmasi penerimaan</span>
-                </li>
-              </ul>
-            </div>
           </div>
         </section>
       ) : (
-        <section className="py-12">
+        <section className="py-8">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="mb-6">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
                 <h2 className="text-2xl font-bold text-gray-900">Akun Terdaftar</h2>
                 
-                <div className="flex gap-4 text-sm">
-                  <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full">
-                    Total: {stats.total}
-                  </div>
-                  <div className="bg-green-100 text-green-800 px-3 py-1 rounded-full">
-                    Tersedia: {stats.available}
-                  </div>
-                  <div className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full">
-                    Escrow: {stats.inEscrow}
-                  </div>
-                  <div className="bg-red-100 text-red-800 px-3 py-1 rounded-full">
-                    Terjual: {stats.sold}
-                  </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setFilterStatus('all')}
+                    className={`px-3 py-1 rounded-lg text-sm font-medium transition ${
+                      filterStatus === 'all' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-700'
+                    }`}
+                  >
+                    Semua ({stats.total})
+                  </button>
+                  <button
+                    onClick={() => setFilterStatus('available')}
+                    className={`px-3 py-1 rounded-lg text-sm font-medium transition ${
+                      filterStatus === 'available' ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-700'
+                    }`}
+                  >
+                    Tersedia ({stats.available})
+                  </button>
+                  <button
+                    onClick={() => setFilterStatus('escrow')}
+                    className={`px-3 py-1 rounded-lg text-sm font-medium transition ${
+                      filterStatus === 'escrow' ? 'bg-purple-600 text-white' : 'bg-gray-200 text-gray-700'
+                    }`}
+                  >
+                    Escrow ({stats.inEscrow})
+                  </button>
+                  <button
+                    onClick={() => setFilterStatus('sold')}
+                    className={`px-3 py-1 rounded-lg text-sm font-medium transition ${
+                      filterStatus === 'sold' ? 'bg-red-600 text-white' : 'bg-gray-200 text-gray-700'
+                    }`}
+                  >
+                    Terjual ({stats.sold})
+                  </button>
                 </div>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setFilterStatus('all')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                    filterStatus === 'all' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                  }`}
-                >
-                  Semua ({stats.total})
-                </button>
-                <button
-                  onClick={() => setFilterStatus('available')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                    filterStatus === 'available' ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                  }`}
-                >
-                  Tersedia ({stats.available})
-                </button>
-                <button
-                  onClick={() => setFilterStatus('escrow')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                    filterStatus === 'escrow' ? 'bg-purple-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                  }`}
-                >
-                  In Escrow ({stats.inEscrow})
-                </button>
-                <button
-                  onClick={() => setFilterStatus('sold')}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                    filterStatus === 'sold' ? 'bg-red-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                  }`}
-                >
-                  Terjual ({stats.sold})
-                </button>
               </div>
             </div>
 
             {myListings.length === 0 ? (
-              <div className="text-center py-8">
+              <div className="text-center py-8 bg-white rounded-lg">
                 <p className="text-gray-600">
                   {filterStatus === 'all' ? 'Belum ada akun yang dijual.' :
                    filterStatus === 'available' ? 'Belum ada akun yang tersedia.' :
@@ -619,116 +705,69 @@ const SellAccount = () => {
                 </p>
               </div>
             ) : (
-              <div className="grid gap-6">
-                {myListings.map(account => (
-                  <div key={account.id} className={`bg-white rounded-xl shadow-md p-4 border-l-4 ${
-                    account.isSold ? 'border-red-500 bg-red-50' : 
-                    account.isInEscrow ? 'border-purple-500 bg-purple-50' : 
-                    'border-green-500'
-                  }`}>
-                    <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-                      <div className="flex items-center gap-4 flex-1">
-                        <div className="relative">
-                          <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-300">
-                            <img src={account.image} alt={account.title} className="w-full h-full object-cover" />
+              <div className="space-y-4">
+                {myListings.map(account => {
+                  const game = games.find(g => g.id === account.gameId);
+                  const contactInfo = getContactDisplay(account);
+                  
+                  return (
+                    <div key={account.id} className="bg-white rounded-lg shadow p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <img 
+                            src={account.images?.[0] || account.image} 
+                            alt={account.title} 
+                            className="w-16 h-16 rounded-lg object-cover"
+                          />
+                          <div>
+                            <h3 className="font-semibold text-gray-900">{account.title}</h3>
+                            <p className="text-sm text-gray-600">{game?.name} • {account.price}</p>
+                            {account.level && <p className="text-sm text-gray-500">Level: {account.level}</p>}
                           </div>
-                          {account.isSold && (
-                            <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs px-1 py-0.5 rounded-full">
-                              SOLD
-                            </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          {account.isInEscrow && account.escrowStatus && getEscrowStatusBadge(account)}
+                          
+                          {account.isSold ? (
+                            <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
+                              Terjual
+                            </span>
+                          ) : account.isInEscrow ? (
+                            <button
+                              onClick={() => navigate('/escrow')}
+                              className="px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 transition"
+                            >
+                              Lihat Escrow
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => handleEdit(account)}
+                                className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDelete(account.id)}
+                                className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700 transition"
+                              >
+                                Hapus
+                              </button>
+                            </>
                           )}
                         </div>
-                        <div className="flex-1">
-                          <h4 className="font-semibold text-gray-900">{account.title}</h4>
-                          <p className="text-sm text-gray-600">Harga: {account.price}</p>
-                          {account.level && <p className="text-sm text-gray-500">Level: {account.level}</p>}
-                          {account.rank && <p className="text-sm text-gray-500">Rank: {account.rank}</p>}
-                        </div>
                       </div>
-
-                      {account.isInEscrow && account.escrowStatus ? (
-                        <div className="flex items-center gap-2">
-                          {getEscrowStatusBadge(account)}
-                          <button
-                            onClick={() => navigate('/escrow')}
-                            className="px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 transition"
-                          >
-                            View Escrow
-                          </button>
-                        </div>
-                      ) : account.isSold ? (
-                        <div className="bg-red-100 border border-red-200 rounded-lg p-3 min-w-0 lg:min-w-[250px]">
-                          <div className="flex items-center gap-2 mb-2">
-                            <svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                            <span className="text-sm font-medium text-red-800">TERJUAL</span>
-                          </div>
-                          <div className="text-xs text-red-700 space-y-1">
-                            <p><strong>Tanggal:</strong> {new Date(account.soldAt).toLocaleDateString('id-ID')}</p>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="bg-green-100 border border-green-200 rounded-lg p-3 min-w-0 lg:min-w-[200px]">
-                          <div className="flex items-center gap-2 mb-2">
-                            <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <span className="text-sm font-medium text-green-800">TERSEDIA</span>
-                          </div>
-                          <p className="text-xs text-green-700">
-                            Ditambahkan: {new Date(account.createdAt).toLocaleDateString('id-ID')}
-                          </p>
+                      
+                      {/* Contact Info */}
+                      {contactInfo && (
+                        <div className="mt-3 pt-3 border-t">
+                          <span className="text-sm text-gray-600">{contactInfo}</span>
                         </div>
                       )}
-
-                      <div className="flex gap-2 flex-wrap">
-                        {!account.isSold && !account.isInEscrow && (
-                          <>
-                            <button
-                              onClick={() => handleEdit(account)}
-                              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDelete(account.id)}
-                              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm"
-                            >
-                              Hapus
-                            </button>
-                          </>
-                        )}
-                        {account.isInEscrow && (
-                          <button
-                            onClick={() => navigate('/escrow')}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm"
-                          >
-                            Lihat Detail Escrow
-                          </button>
-                        )}
-                      </div>
                     </div>
-
-                    {account.description && (
-                      <div className="mt-4 pt-4 border-t border-gray-200">
-                        <p className="text-sm text-gray-600">{account.description}</p>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {myListings.length > 0 && (
-              <div className="mt-8 bg-green-50 border border-green-200 rounded-lg p-4">
-                <h4 className="font-medium text-green-800 mb-2">Info Escrow:</h4>
-                <ul className="text-sm text-green-700 space-y-1">
-                  <li>• Akun yang sedang dalam proses escrow tidak dapat diedit atau dihapus</li>
-                  <li>• Dana akan dirilis ke wallet Anda setelah pembeli konfirmasi penerimaan</li>
-                  <li>• Anda dapat melihat status escrow di halaman Escrow Management</li>
-                  <li>• Kirim detail akun segera setelah pembayaran dikonfirmasi admin</li>
-                </ul>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -736,8 +775,8 @@ const SellAccount = () => {
       )}
 
       <footer className="bg-gray-900 text-white mt-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="border-t border-gray-800 pt-8 text-center text-gray-400">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="text-center text-gray-400">
             <p>&copy; 2025 GameMarket. All rights reserved.</p>
           </div>
         </div>
