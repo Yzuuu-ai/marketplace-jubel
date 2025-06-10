@@ -1,4 +1,3 @@
-// src/pages/Login.jsx - GUNAKAN FILE INI untuk menggantikan file Login.jsx yang lama
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import Header from '../components/Header';
@@ -17,7 +16,7 @@ const Login = () => {
   const navigate = useNavigate();
   const { login, isAuthenticated } = useAuth();
 
-  // Redirect jika sudah login
+  // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated) {
       navigate('/');
@@ -36,33 +35,46 @@ const Login = () => {
         throw new Error('Email dan password wajib diisi');
       }
 
-      // Get registered users
-      const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
-      
-      // Find user by email
-      const user = registeredUsers.find(u => u.email === email);
-      
-      if (!user) {
-        throw new Error('Email tidak terdaftar');
+      const response = await fetch('http://localhost:5000/api/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          password
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (data.errors) {
+          const backendErrors = {};
+          if (data.errors.email) {
+            backendErrors.email = data.errors.email;
+          }
+          if (data.errors.password) {
+            backendErrors.password = data.errors.password;
+          }
+          throw new Error(data.message || 'Login gagal');
+        } else {
+          throw new Error(data.message || 'Login gagal');
+        }
       }
 
-      // Check password (in production, use proper hashing)
-      if (atob(user.password) !== password) {
-        throw new Error('Password salah');
-      }
-
-      // Create session
+      // Login successful
       const sessionData = {
-        userId: user.id,
-        email: user.email,
-        nama: user.nama,
-        accountType: 'email',
+        userId: data.user.id,
+        email: data.user.email,
+        nama: data.user.name,
+        accountType: data.user.account_type,
         loginAt: new Date().toISOString()
       };
 
       // Save session
       localStorage.setItem('currentSession', JSON.stringify(sessionData));
-      
+
       // If remember me is checked, save email
       if (rememberMe) {
         localStorage.setItem('rememberedEmail', email);
@@ -70,11 +82,7 @@ const Login = () => {
         localStorage.removeItem('rememberedEmail');
       }
 
-      // Simulate wallet address for email users (in production, handle differently)
-      const simulatedWallet = `email_${user.id}`;
-      await login(simulatedWallet);
-
-      // Navigate to home
+      await login(`email_${data.user.id}`);
       navigate('/');
 
     } catch (err) {
@@ -90,18 +98,15 @@ const Login = () => {
     setError('');
 
     try {
-      // Cek apakah Metamask terinstall
       if (!window.ethereum) {
         throw new Error('Metamask tidak ditemukan. Silakan install ekstensi Metamask terlebih dahulu.');
       }
 
-      // Meminta koneksi ke akun Metamask
       const accounts = await window.ethereum.request({
         method: 'eth_requestAccounts',
       });
 
       if (accounts.length > 0) {
-        // Simpan alamat wallet
         const walletAddress = accounts[0];
         await login(walletAddress);
         navigate('/');
@@ -120,16 +125,9 @@ const Login = () => {
       ...prev,
       [name]: value
     }));
-    // Clear error when typing
     if (error) setError('');
   };
 
-  // Handler untuk placeholder terms dan privacy
-  const handlePlaceholderLink = (page) => {
-    alert(`Halaman ${page} akan segera tersedia`);
-  };
-
-  // Load remembered email
   useEffect(() => {
     const rememberedEmail = localStorage.getItem('rememberedEmail');
     if (rememberedEmail) {
@@ -145,11 +143,6 @@ const Login = () => {
       <main className="flex-grow flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-xl shadow-md">
           <div>
-            <div className="mx-auto flex items-center justify-center bg-blue-100 rounded-full w-16 h-16">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-blue-600" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-              </svg>
-            </div>
             <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
               Masuk ke GameMarket
             </h2>
@@ -163,9 +156,7 @@ const Login = () => {
             <button
               onClick={() => setLoginMethod('email')}
               className={`flex-1 py-2 text-sm font-medium ${
-                loginMethod === 'email'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-50'
+                loginMethod === 'email' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
               }`}
             >
               Email & Password
@@ -173,9 +164,7 @@ const Login = () => {
             <button
               onClick={() => setLoginMethod('metamask')}
               className={`flex-1 py-2 text-sm font-medium ${
-                loginMethod === 'metamask'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-50'
+                loginMethod === 'metamask' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
               }`}
             >
               MetaMask Wallet
@@ -374,7 +363,7 @@ const Login = () => {
             </p>
           </div>
 
-          {/* Tambahkan tombol untuk kembali ke beranda */}
+          {/* Button for returning to the homepage */}
           <div className="text-center mt-6">
             <button
               type="button"

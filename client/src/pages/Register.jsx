@@ -91,42 +91,46 @@ const Register = () => {
     setIsSubmitting(true);
 
     try {
-      // Get existing users
-      const existingUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
-      
-      // Check if email already exists
-      if (existingUsers.some(user => user.email === formData.email)) {
-        setErrors({ email: 'Email sudah terdaftar' });
-        setIsSubmitting(false);
+      const response = await fetch('http://localhost:5000/api/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          nama: formData.nama,
+          email: formData.email,
+          password: formData.password,
+          nomor: formData.nomor
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        // Handle error response
+        if (data.errors) {
+          // Mapping error dari backend ke field frontend
+          const backendErrors = {};
+          if (data.errors.email) {
+            backendErrors.email = data.errors.email;
+          }
+          if (data.errors.password) {
+            backendErrors.password = data.errors.password;
+          }
+          setErrors({ ...errors, ...backendErrors, general: data.message || 'Registrasi gagal' });
+        } else {
+          setErrors({ general: data.message || 'Registrasi gagal' });
+        }
         return;
       }
 
-      // Create new user
-      const newUser = {
-        id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        nama: formData.nama,
-        email: formData.email,
-        password: btoa(formData.password), // Simple encoding (use proper hashing in production)
-        nomor: formData.nomor,
-        createdAt: new Date().toISOString(),
-        isEmailVerified: false,
-        walletAddress: null, // Can be linked later
-        accountType: 'email'
-      };
-
-      // Save user
-      existingUsers.push(newUser);
-      localStorage.setItem('registeredUsers', JSON.stringify(existingUsers));
-
-      // Show success message
+      // Registrasi sukses
       alert('Registrasi berhasil! Silakan login dengan email dan password Anda.');
-      
-      // Redirect to login
       navigate('/login');
       
     } catch (error) {
       console.error('Registration error:', error);
-      setErrors({ general: 'Terjadi kesalahan saat mendaftar. Silakan coba lagi.' });
+      setErrors({ general: 'Terjadi kesalahan jaringan. Silakan coba lagi.' });
     } finally {
       setIsSubmitting(false);
     }
