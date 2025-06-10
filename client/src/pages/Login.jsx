@@ -4,7 +4,7 @@ import Header from '../components/Header';
 import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
-  const [loginMethod, setLoginMethod] = useState('email'); // 'email' or 'metamask'
+  const [loginMethod, setLoginMethod] = useState('email');
   const [emailCredentials, setEmailCredentials] = useState({
     email: '',
     password: ''
@@ -16,7 +16,6 @@ const Login = () => {
   const navigate = useNavigate();
   const { login, isAuthenticated } = useAuth();
 
-  // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated) {
       navigate('/');
@@ -35,6 +34,8 @@ const Login = () => {
         throw new Error('Email dan password wajib diisi');
       }
 
+      console.log('Attempting login with email:', email);
+
       const response = await fetch('http://localhost:5000/api/login', {
         method: 'POST',
         headers: {
@@ -46,36 +47,64 @@ const Login = () => {
         })
       });
 
+      // Debug response
+      console.log('Response status:', response.status);
+      
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('Non-JSON response:', text);
+        throw new Error('Server tidak mengembalikan data valid. Pastikan server berjalan dengan benar.');
+      }
+
       const data = await response.json();
+      console.log('Login response data:', data);
 
       if (!response.ok) {
         if (data.errors) {
-          const backendErrors = {};
+          // Handle specific field errors
           if (data.errors.email) {
-            backendErrors.email = data.errors.email;
+            throw new Error(data.errors.email);
           }
           if (data.errors.password) {
-            backendErrors.password = data.errors.password;
+            throw new Error(data.errors.password);
           }
-          throw new Error(data.message || 'Login gagal');
-        } else {
-          throw new Error(data.message || 'Login gagal');
         }
+        throw new Error(data.message || 'Login gagal');
       }
 
       // Login successful
+      console.log('Login successful, user:', data.user);
+
+      // Save session data
       const sessionData = {
         userId: data.user.id,
         email: data.user.email,
         nama: data.user.name,
-        accountType: data.user.account_type,
+        accountType: data.user.account_type || 'email',
         loginAt: new Date().toISOString()
       };
 
-      // Save session
       localStorage.setItem('currentSession', JSON.stringify(sessionData));
 
-      // If remember me is checked, save email
+      // Save user to registeredUsers if not exists
+      const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+      const existingUser = registeredUsers.find(u => u.id === data.user.id);
+      
+      if (!existingUser) {
+        registeredUsers.push({
+          id: data.user.id,
+          nama: data.user.name,
+          email: data.user.email,
+          nomor: data.user.phone || '',
+          password: '', // Don't store password
+          createdAt: new Date().toISOString()
+        });
+        localStorage.setItem('registeredUsers', JSON.stringify(registeredUsers));
+      }
+
+      // Remember email if checked
       if (rememberMe) {
         localStorage.setItem('rememberedEmail', email);
       } else {
@@ -87,7 +116,15 @@ const Login = () => {
 
     } catch (err) {
       console.error('Email login error:', err);
-      setError(err.message || 'Terjadi kesalahan saat login');
+      
+      // Better error messages
+      if (err.message.includes('Failed to fetch')) {
+        setError('Tidak dapat terhubung ke server. Pastikan server berjalan di http://localhost:5000');
+      } else if (err.message.includes('Unexpected token')) {
+        setError('Server error: Response tidak valid. Cek console untuk detail.');
+      } else {
+        setError(err.message || 'Terjadi kesalahan saat login');
+      }
     } finally {
       setIsConnecting(false);
     }
@@ -108,6 +145,15 @@ const Login = () => {
 
       if (accounts.length > 0) {
         const walletAddress = accounts[0];
+        
+        // Save wallet session
+        const sessionData = {
+          walletAddress,
+          accountType: 'metamask',
+          loginAt: new Date().toISOString()
+        };
+        localStorage.setItem('currentSession', JSON.stringify(sessionData));
+        
         await login(walletAddress);
         navigate('/');
       }
@@ -126,6 +172,10 @@ const Login = () => {
       [name]: value
     }));
     if (error) setError('');
+  };
+
+  const handlePlaceholderLink = (name) => {
+    alert(`${name} akan segera tersedia`);
   };
 
   useEffect(() => {
@@ -156,7 +206,9 @@ const Login = () => {
             <button
               onClick={() => setLoginMethod('email')}
               className={`flex-1 py-2 text-sm font-medium ${
-                loginMethod === 'email' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
+                loginMethod === 'email' 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-white text-gray-700 hover:bg-gray-50'
               }`}
             >
               Email & Password
@@ -164,7 +216,9 @@ const Login = () => {
             <button
               onClick={() => setLoginMethod('metamask')}
               className={`flex-1 py-2 text-sm font-medium ${
-                loginMethod === 'metamask' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
+                loginMethod === 'metamask' 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-white text-gray-700 hover:bg-gray-50'
               }`}
             >
               MetaMask Wallet
@@ -180,7 +234,6 @@ const Login = () => {
           <div className="mt-8 space-y-6">
             {loginMethod === 'email' ? (
               <form onSubmit={handleEmailLogin} className="space-y-4">
-                {/* Email Field */}
                 <div>
                   <label htmlFor="email" className="block text-sm font-medium text-gray-700">
                     Email
@@ -193,17 +246,16 @@ const Login = () => {
                     required
                     value={emailCredentials.email}
                     onChange={handleEmailChange}
-                    className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                     placeholder="nama@email.com"
                   />
                 </div>
 
-                {/* Password Field */}
                 <div>
                   <label htmlFor="password" className="block text-sm font-medium text-gray-700">
                     Password
                   </label>
-                  <div className="relative">
+                  <div className="relative mt-1">
                     <input
                       id="password"
                       name="password"
@@ -212,7 +264,7 @@ const Login = () => {
                       required
                       value={emailCredentials.password}
                       onChange={handleEmailChange}
-                      className="mt-1 appearance-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm pr-10"
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm pr-10"
                       placeholder="Masukkan password"
                     />
                     <button
@@ -234,7 +286,6 @@ const Login = () => {
                   </div>
                 </div>
 
-                {/* Remember Me & Forgot Password */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center">
                     <input
@@ -253,7 +304,7 @@ const Login = () => {
                   <div className="text-sm">
                     <button
                       type="button"
-                      onClick={() => alert('Fitur lupa password akan segera tersedia')}
+                      onClick={() => handlePlaceholderLink('Lupa password')}
                       className="font-medium text-blue-600 hover:text-blue-500"
                     >
                       Lupa password?
@@ -261,11 +312,10 @@ const Login = () => {
                   </div>
                 </div>
 
-                {/* Submit Button */}
                 <button
                   type="submit"
                   disabled={isConnecting}
-                  className={`group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
+                  className={`w-full flex justify-center py-3 px-4 border border-transparent rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
                     isConnecting ? 'opacity-75 cursor-not-allowed' : ''
                   }`}
                 >
@@ -282,7 +332,6 @@ const Login = () => {
                   )}
                 </button>
 
-                {/* Register Link */}
                 <div className="text-center text-sm">
                   <span className="text-gray-600">Belum punya akun?</span>{' '}
                   <Link to="/register" className="font-medium text-blue-600 hover:text-blue-500">
@@ -295,7 +344,7 @@ const Login = () => {
                 <button
                   onClick={connectWallet}
                   disabled={isConnecting}
-                  className={`group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
+                  className={`w-full flex justify-center py-3 px-4 border border-transparent rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
                     isConnecting ? 'opacity-75 cursor-not-allowed' : ''
                   }`}
                 >
@@ -324,7 +373,7 @@ const Login = () => {
                   </div>
                 </button>
                 
-                <div className="text-center mt-4">
+                <div className="text-center">
                   <p className="text-sm text-gray-600">
                     Belum punya wallet?{' '}
                     <a 
@@ -363,8 +412,7 @@ const Login = () => {
             </p>
           </div>
 
-          {/* Button for returning to the homepage */}
-          <div className="text-center mt-6">
+          <div className="text-center mt-4">
             <button
               type="button"
               onClick={() => navigate('/')}
