@@ -77,16 +77,18 @@ const Login = () => {
       // Login successful
       console.log('Login successful, user:', data.user);
 
-      // Save session data
+      // Save session data with token
       const sessionData = {
         userId: data.user.id,
         email: data.user.email,
         nama: data.user.name,
         accountType: data.user.account_type || 'email',
+        token: data.token,
         loginAt: new Date().toISOString()
       };
 
       localStorage.setItem('currentSession', JSON.stringify(sessionData));
+      localStorage.setItem('authToken', data.token);
 
       // Save user to registeredUsers if not exists
       const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
@@ -146,16 +148,58 @@ const Login = () => {
       if (accounts.length > 0) {
         const walletAddress = accounts[0];
         
-        // Save wallet session
-        const sessionData = {
-          walletAddress,
-          accountType: 'metamask',
-          loginAt: new Date().toISOString()
-        };
-        localStorage.setItem('currentSession', JSON.stringify(sessionData));
-        
-        await login(walletAddress);
-        navigate('/');
+        // Check if wallet is connected to any user (email or wallet profile)
+        try {
+          // First check if wallet is connected to an email user
+          const emailUserResponse = await fetch(`http://localhost:5000/api/users/by-wallet/${walletAddress}`);
+          
+          if (emailUserResponse.ok) {
+            const emailUserData = await emailUserResponse.json();
+            if (emailUserData.success && emailUserData.user) {
+              // Wallet belongs to an email user, login as email user
+              const sessionData = {
+                userId: emailUserData.user.id,
+                email: emailUserData.user.email,
+                nama: emailUserData.user.name,
+                accountType: 'email',
+                connectedWallet: walletAddress,
+                loginAt: new Date().toISOString()
+              };
+              localStorage.setItem('currentSession', JSON.stringify(sessionData));
+              
+              await login(`email_${emailUserData.user.id}`);
+              navigate('/');
+              return;
+            }
+          }
+          
+          // Check if wallet has standalone profile
+          const walletResponse = await fetch(`http://localhost:5000/api/wallet-profile/${walletAddress}`);
+          
+          if (walletResponse.ok) {
+            const walletData = await walletResponse.json();
+            if (walletData.success) {
+              // Wallet has standalone profile, login as wallet user
+              const sessionData = {
+                walletAddress,
+                accountType: 'wallet',
+                loginAt: new Date().toISOString()
+              };
+              localStorage.setItem('currentSession', JSON.stringify(sessionData));
+              
+              await login(walletAddress);
+              navigate('/');
+              return;
+            }
+          }
+          
+          // Wallet not registered anywhere
+          setError('Wallet belum terdaftar. Silakan daftar dengan email terlebih dahulu, lalu hubungkan wallet di halaman profil.');
+          
+        } catch (fetchError) {
+          console.error('Error checking wallet:', fetchError);
+          setError('Gagal memverifikasi wallet. Pastikan server berjalan.');
+        }
       }
     } catch (err) {
       console.error('Kesalahan koneksi wallet:', err);

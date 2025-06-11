@@ -67,16 +67,21 @@ export const AuthProvider = ({ children }) => {
 
   // Fungsi untuk menyimpan wallet address secara manual
   const saveWalletAddress = (address) => {
-    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+    if (address && !/^0x[a-fA-F0-9]{40}$/.test(address)) {
       throw new Error('Alamat wallet tidak valid');
     }
 
     setWalletAddress(address);
-    setIsAuthenticated(true);
-    setConnectionMethod('manual');
-    setAccountType('wallet');
-    localStorage.removeItem('walletManuallyDisconnected');
-    initializeWalletProfile(address);
+    
+    // Only change account type if not already an email user
+    if (accountType !== 'email') {
+      setIsAuthenticated(true);
+      setConnectionMethod('manual');
+      setAccountType('wallet');
+      localStorage.removeItem('walletManuallyDisconnected');
+      initializeWalletProfile(address);
+    }
+    // For email users, just update wallet address without changing account type
   };
 
   // Fungsi untuk memutuskan koneksi
@@ -135,33 +140,62 @@ export const AuthProvider = ({ children }) => {
   // Fungsi untuk memeriksa koneksi yang ada
   const checkExistingConnection = useCallback(async () => {
     try {
-      // Cek sesi email terlebih dahulu
+      // Cek sesi yang ada
       const session = JSON.parse(localStorage.getItem('currentSession') || '{}');
-      if (session.userId) {
-        const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
-        const user = registeredUsers.find(u => u.id === session.userId);
-        
-        if (user) {
-          setCurrentUser(user);
-          setProfileData({
-            nama: user.nama,
-            email: user.email,
-            nomor: user.nomor || ''
+      
+      if (session.userId && session.token) {
+        // Email user session - fetch from API
+        try {
+          const response = await fetch('http://localhost:5000/api/profile', {
+            headers: {
+              'Authorization': `Bearer ${session.token}`
+            }
           });
-          setIsAuthenticated(true);
-          setConnectionMethod('email');
-          setAccountType('email');
-          return;
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success) {
+              setCurrentUser(data.user);
+              setProfileData({
+                nama: data.user.name,
+                email: data.user.email,
+                nomor: data.user.phone || ''
+              });
+              setIsAuthenticated(true);
+              setConnectionMethod('email');
+              setAccountType('email');
+              
+              // Set wallet if connected
+              if (data.user.wallet_address) {
+                setWalletAddress(data.user.wallet_address);
+              }
+              return;
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching profile from API:', error);
+          // Clear invalid session
+          localStorage.removeItem('currentSession');
+          localStorage.removeItem('authToken');
         }
+      } else if (session.walletAddress) {
+        // Wallet user session
+        setWalletAddress(session.walletAddress);
+        setIsAuthenticated(true);
+        setConnectionMethod('auto');
+        setAccountType('wallet');
+        initializeWalletProfile(session.walletAddress);
+        return;
       }
 
-      // Cek koneksi wallet
+      // Fallback: Check MetaMask connection for wallet users only
       if (!window.ethereum) return;
 
       const accounts = await window.ethereum.request({ method: 'eth_accounts' });
       const wasManuallyDisconnected = localStorage.getItem('walletManuallyDisconnected') === 'true';
 
-      if (accounts.length > 0 && !wasManuallyDisconnected) {
+      if (accounts.length > 0 && !wasManuallyDisconnected && !session.userId) {
+        // Only auto-connect if no email session exists
         setWalletAddress(accounts[0]);
         setIsAuthenticated(true);
         setConnectionMethod('auto');
@@ -187,13 +221,19 @@ export const AuthProvider = ({ children }) => {
     setProfileData(newProfileData);
     
     if (accountType === 'email' && currentUser) {
-      // Update untuk user email
+      // Update untuk user email - mapping field nama ke name dan nomor ke phone
+      const mappedData = {
+        ...newProfileData,
+        name: newProfileData.nama, // Map nama ke name untuk server
+        phone: newProfileData.nomor // Map nomor ke phone untuk server
+      };
+      
       const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
       const updatedUsers = registeredUsers.map(u => 
-        u.id === currentUser.id ? { ...u, ...newProfileData } : u
+        u.id === currentUser.id ? { ...u, ...mappedData } : u
       );
       localStorage.setItem('registeredUsers', JSON.stringify(updatedUsers));
-      setCurrentUser(prev => ({ ...prev, ...newProfileData }));
+      setCurrentUser(prev => ({ ...prev, ...mappedData }));
     } else if (accountType === 'wallet' && walletAddress) {
       // Update untuk user wallet
       const userProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
@@ -231,21 +271,43 @@ export const AuthProvider = ({ children }) => {
         const userId = identifier.replace('email_', '');
         const session = JSON.parse(localStorage.getItem('currentSession') || '{}');
         
-        if (session.userId === parseInt(userId)) {
-          const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
-          const user = registeredUsers.find(u => u.id === parseInt(userId));
-          
-          if (user) {
-            setCurrentUser(user);
-            setProfileData({
-              nama: user.nama,
-              email: user.email,
-              nomor: user.nomor || ''
+        if (session.userId === parseInt(userId) && session.token) {
+          // Fetch user data from API using token
+          try {
+            const response = await fetch('http://localhost:5000/api/profile', {
+              headers: {
+                'Authorization': `Bearer ${session.token}`
+              }
             });
-            setIsAuthenticated(true);
-            setConnectionMethod('email');
-            setAccountType('email');
-            return true;
+            
+            if (response.ok) {
+              const data = await response.json();
+              if (data.success) {
+                setCurrentUser(data.user);
+                setProfileData({
+                  nama: data.user.name,
+                  email: data.user.email,
+                  nomor: data.user.phone || ''
+                });
+                setIsAuthenticated(true);
+                setConnectionMethod('email');
+                setAccountType('email');
+                
+                // Check if user has connected wallet
+                if (data.user.wallet_address) {
+                  setWalletAddress(data.user.wallet_address);
+                }
+                return true;
+              }
+            } else {
+              // Token invalid, clear session
+              localStorage.removeItem('currentSession');
+              localStorage.removeItem('authToken');
+              throw new Error('Token tidak valid');
+            }
+          } catch (fetchError) {
+            console.error('Error fetching user profile:', fetchError);
+            throw new Error('Gagal mengambil data profil');
           }
         }
         throw new Error('Session tidak valid');

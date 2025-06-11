@@ -206,13 +206,23 @@ const SellAccount = () => {
     setError('');
 
     try {
-      if (!formData.gameId || !formData.price || !formData.contactValue.trim()) {
-        throw new Error('Harap isi semua field yang wajib diisi');
+      // Validasi form yang lebih detail
+      if (!formData.gameId) {
+        throw new Error('Silakan pilih game terlebih dahulu');
+      }
+      if (!formData.price || parseFloat(formData.price) <= 0) {
+        throw new Error('Harga harus diisi dan lebih dari 0 ETH');
+      }
+      if (!formData.contactValue.trim()) {
+        throw new Error('Informasi kontak wajib diisi');
+      }
+      if (!walletAddress) {
+        throw new Error('Wallet tidak terhubung. Silakan hubungkan wallet terlebih dahulu.');
       }
       
       // Get user ID from session
-      const session = JSON.parse(localStorage.getItem('currentSession') || '{}');
-      const sellerId = session.userId || null;
+      const currentSession = JSON.parse(localStorage.getItem('currentSession') || '{}');
+      const sellerId = currentSession.userId || null;
       
       // Debug log
       console.log('Submitting with wallet:', walletAddress);
@@ -234,6 +244,14 @@ const SellAccount = () => {
 
       console.log('API data being sent:', apiData);
 
+      // Dapatkan token autentikasi
+      const session = JSON.parse(localStorage.getItem('currentSession') || '{}');
+      const token = session.token || localStorage.getItem('authToken');
+      
+      if (!token) {
+        throw new Error('Token autentikasi tidak ditemukan. Silakan login ulang.');
+      }
+
       let response;
       if (isEditing) {
         // Update existing account
@@ -242,6 +260,7 @@ const SellAccount = () => {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify(apiData)
         });
@@ -251,6 +270,7 @@ const SellAccount = () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify(apiData)
         });
@@ -260,6 +280,9 @@ const SellAccount = () => {
       console.log('Server response:', data);
 
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          throw new Error('Token tidak valid. Silakan login ulang.');
+        }
         throw new Error(data.message || 'Gagal menyimpan akun');
       }
       
@@ -284,6 +307,7 @@ const SellAccount = () => {
       // Immediately refresh listings
       await refreshListings();
       
+      // Tampilkan pesan sukses yang lebih spesifik
       setTimeout(() => {
         setSuccess(false);
         if (!isEditing) {
@@ -307,16 +331,33 @@ const SellAccount = () => {
     
     if (window.confirm('Yakin ingin menghapus akun ini?')) {
       try {
-        const response = await fetch(`http://localhost:5000/api/game-accounts/${id}?sellerWallet=${walletAddress}`, {
-          method: 'DELETE'
+        // Dapatkan token autentikasi
+        const session = JSON.parse(localStorage.getItem('currentSession') || '{}');
+        const token = session.token || localStorage.getItem('authToken');
+        
+        if (!token) {
+          alert('Token autentikasi tidak ditemukan. Silakan login ulang.');
+          return;
+        }
+
+        const response = await fetch(`http://localhost:5000/api/game-accounts/${id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
         });
         
         const data = await response.json();
         
         if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            alert('Token tidak valid. Silakan login ulang.');
+            return;
+          }
           throw new Error(data.message || 'Gagal menghapus akun');
         }
         
+        alert('Akun berhasil dihapus!');
         refreshListings();
       } catch (error) {
         console.error('Error deleting account:', error);
@@ -326,8 +367,12 @@ const SellAccount = () => {
   };
 
   const handleEdit = (account) => {
-    if (account.is_sold || account.is_in_escrow) {
-      alert('Akun yang sudah terjual atau dalam escrow tidak dapat diedit');
+    if (account.is_sold) {
+      alert('Akun yang sudah terjual tidak dapat diedit');
+      return;
+    }
+    if (account.is_in_escrow) {
+      alert('Akun yang sedang dalam proses escrow tidak dapat diedit');
       return;
     }
 
@@ -449,7 +494,27 @@ const SellAccount = () => {
         <section className="py-8">
           <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="bg-white rounded-xl shadow-md p-6">
-              {success ? (
+              {!walletAddress ? (
+                <div className="text-center py-8">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-yellow-100 mb-4">
+                    <svg className="w-8 h-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                    Wallet Diperlukan
+                  </h2>
+                  <p className="text-gray-600 mb-6">
+                    Anda perlu menghubungkan wallet terlebih dahulu untuk dapat menjual akun game.
+                  </p>
+                  <button
+                    onClick={() => navigate('/profile')}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition"
+                  >
+                    Pergi ke Profil
+                  </button>
+                </div>
+              ) : success ? (
                 <div className="text-center py-8">
                   <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 mb-4">
                     <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">

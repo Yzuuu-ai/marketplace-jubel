@@ -39,9 +39,9 @@ const Profile = () => {
   useEffect(() => {
     if (accountType === 'email' && currentUser) {
       setEditData({
-        nama: currentUser.nama || '',
+        nama: currentUser.name || currentUser.nama || '', // Server mengirim 'name', fallback ke 'nama'
         email: currentUser.email || '',
-        nomor: currentUser.nomor || ''
+        nomor: currentUser.phone || currentUser.nomor || '' // Server mengirim 'phone', fallback ke 'nomor'
       });
     } else if (accountType === 'wallet' && walletAddress) {
       const savedProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
@@ -83,9 +83,9 @@ const Profile = () => {
     if (isEditing) {
       if (accountType === 'email' && currentUser) {
         setEditData({
-          nama: currentUser.nama || '',
+          nama: currentUser.name || currentUser.nama || '',
           email: currentUser.email || '',
-          nomor: currentUser.nomor || ''
+          nomor: currentUser.phone || currentUser.nomor || ''
         });
       } else {
         setEditData({ ...profileData });
@@ -94,49 +94,120 @@ const Profile = () => {
     setIsEditing(!isEditing);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!editData.nama.trim()) {
-      alert('Nama tidak boleh kosong');
+      alert('Nama lengkap tidak boleh kosong');
       return;
     }
 
-    if (accountType === 'email') {
-      const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
-      const updatedUsers = registeredUsers.map(user => {
-        if (user.id === currentUser.id) {
-          return {
-            ...user,
-            nama: editData.nama,
-            nomor: editData.nomor
-          };
+    try {
+      if (accountType === 'email') {
+        // Simpan ke server menggunakan API
+        const session = JSON.parse(localStorage.getItem('currentSession') || '{}');
+        const token = session.token || localStorage.getItem('authToken');
+        
+        if (!token) {
+          alert('Token autentikasi tidak ditemukan. Silakan login ulang.');
+          return;
         }
-        return user;
+
+        const response = await fetch('http://localhost:5000/api/profile', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            name: editData.nama, // Server menggunakan field 'name'
+            phone: editData.nomor,
+            email: editData.email
+          })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            alert('Token tidak valid. Silakan login ulang.');
+            return;
+          }
+          throw new Error(data.message || 'Gagal menyimpan profil');
+        }
+
+        // Update localStorage untuk sinkronisasi
+        const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+        const updatedUsers = registeredUsers.map(user => {
+          if (user.id === currentUser.id) {
+            return {
+              ...user,
+              nama: editData.nama,
+              name: editData.nama, // Tambahkan field name juga
+              nomor: editData.nomor,
+              phone: editData.nomor
+            };
+          }
+          return user;
+        });
+        localStorage.setItem('registeredUsers', JSON.stringify(updatedUsers));
+
+        // Update session
+        if (session.userId === currentUser.id) {
+          session.nama = editData.nama;
+          session.name = editData.nama;
+          localStorage.setItem('currentSession', JSON.stringify(session));
+        }
+
+        alert('Profil berhasil disimpan!');
+      } else {
+        // Untuk wallet user, simpan ke localStorage dan server jika ada API wallet profile
+        const savedProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
+        savedProfiles[walletAddress] = editData;
+        localStorage.setItem('userProfiles', JSON.stringify(savedProfiles));
+
+        // Coba simpan ke server juga untuk wallet profile
+        try {
+          await fetch('http://localhost:5000/api/wallet-profile', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              wallet_address: walletAddress,
+              name: editData.nama,
+              email: editData.email,
+              phone: editData.nomor
+            })
+          });
+        } catch (error) {
+          console.log('Wallet profile API not available, saved locally only');
+        }
+
+        alert('Profil berhasil disimpan!');
+      }
+
+      // Update context
+      updateProfileData(editData);
+
+      // Update game accounts
+      const gameAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
+      const updatedAccounts = gameAccounts.map(account => {
+        if (account.sellerWallet === walletAddress) {
+          return { ...account, sellerName: editData.nama };
+        }
+        return account;
       });
-      localStorage.setItem('registeredUsers', JSON.stringify(updatedUsers));
+      localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
 
-      const session = JSON.parse(localStorage.getItem('currentSession') || '{}');
-      if (session.userId === currentUser.id) {
-        session.nama = editData.nama;
-        localStorage.setItem('currentSession', JSON.stringify(session));
+      setIsEditing(false);
+      
+      // Refresh data dari server
+      if (accountType === 'email') {
+        window.location.reload();
       }
-    } else {
-      const savedProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
-      savedProfiles[walletAddress] = editData;
-      localStorage.setItem('userProfiles', JSON.stringify(savedProfiles));
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      alert('Gagal menyimpan profil: ' + error.message);
     }
-
-    updateProfileData(editData);
-
-    const gameAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
-    const updatedAccounts = gameAccounts.map(account => {
-      if (account.sellerWallet === walletAddress) {
-        return { ...account, sellerName: editData.nama };
-      }
-      return account;
-    });
-    localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
-
-    setIsEditing(false);
   };
 
   const handleInputChange = (field, value) => {
@@ -149,7 +220,16 @@ const Profile = () => {
   const handleConnectWalletClick = async () => {
     setIsConnectingWallet(true);
     try {
-      await connectWallet(); // Menghubungkan MetaMask
+      if (!window.ethereum) {
+        throw new Error('MetaMask tidak terdeteksi. Silakan install MetaMask terlebih dahulu.');
+      }
+
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      
+      if (accounts.length > 0) {
+        const walletAddress = accounts[0];
+        await handleWalletConnection(walletAddress);
+      }
       setShowWalletForm(false);
     } catch (error) {
       console.error('Error connecting wallet:', error);
@@ -159,7 +239,7 @@ const Profile = () => {
     }
   };
 
-  const handleManualWalletConnect = () => {
+  const handleManualWalletConnect = async () => {
     if (!newWalletAddress) {
       alert('Alamat wallet tidak boleh kosong');
       return;
@@ -170,15 +250,79 @@ const Profile = () => {
       return;
     }
 
-    saveWalletAddress(newWalletAddress); // Simpan alamat wallet
-    setShowWalletForm(false);
-    setNewWalletAddress('');
+    try {
+      await handleWalletConnection(newWalletAddress);
+      setShowWalletForm(false);
+      setNewWalletAddress('');
+    } catch (error) {
+      alert('Gagal menghubungkan wallet: ' + error.message);
+    }
+  };
+
+  const handleWalletConnection = async (walletAddress) => {
+    try {
+      const session = JSON.parse(localStorage.getItem('currentSession') || '{}');
+      const token = session.token || localStorage.getItem('authToken');
+      
+      console.log('Session:', session);
+      console.log('Token found:', !!token);
+      console.log('Account type:', accountType);
+      console.log('Current user:', currentUser);
+      
+      if (!token) {
+        // Try to get fresh token by re-authenticating
+        if (accountType === 'email' && currentUser && currentUser.email) {
+          throw new Error('Token tidak ditemukan. Silakan login ulang untuk menghubungkan wallet.');
+        } else {
+          throw new Error('Token autentikasi tidak ditemukan. Silakan login terlebih dahulu.');
+        }
+      }
+
+      console.log('Making API call with token...');
+      const response = await fetch('http://localhost:5000/api/profile/connect-wallet', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          wallet_address: walletAddress
+        })
+      });
+
+      console.log('API response status:', response.status);
+      const data = await response.json();
+      console.log('API response data:', data);
+
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          throw new Error('Token tidak valid. Silakan login ulang.');
+        }
+        throw new Error(data.message || 'Gagal menghubungkan wallet');
+      }
+
+      // Update session with connected wallet (but keep email account type)
+      const updatedSession = {
+        ...session,
+        connectedWallet: walletAddress
+      };
+      localStorage.setItem('currentSession', JSON.stringify(updatedSession));
+
+      // Update context without changing account type
+      saveWalletAddress(walletAddress);
+      
+      alert('Wallet berhasil terhubung!');
+      
+      // Refresh page to update profile data
+      window.location.reload();
+    } catch (error) {
+      console.error('Error connecting wallet:', error);
+      throw error;
+    }
   };
 
   const handleDisconnectWallet = () => {
-    if (window.confirm('Apakah Anda yakin ingin melepas wallet ini?')) {
-      logout(); // Memanggil fungsi logout untuk melepaskan wallet
-    }
+    alert('Wallet yang sudah terhubung tidak dapat dilepas untuk keamanan akun. Jika Anda ingin mengganti wallet, silakan hubungi administrator.');
   };
 
   const shortenAddress = (address) => {
@@ -223,11 +367,11 @@ const Profile = () => {
                   </div>
 
                   <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                    {editData.nama || 'Unnamed User'}
+                    {editData.nama || 'Pengguna Tanpa Nama'}
                   </h3>
 
                   <p className="text-sm text-gray-500 mb-4">
-                    {accountType === 'email' ? 'Email Account' : `Wallet: ${shortenAddress(walletAddress)}`}
+                    {accountType === 'email' ? 'Akun Email' : `Wallet: ${shortenAddress(walletAddress)}`}
                   </p>
 
                   <div className="flex items-center justify-center space-x-2 text-sm">
@@ -239,7 +383,7 @@ const Profile = () => {
                   {/* Account Type Badge */}
                   <div className="mt-4">
                     <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${accountType === 'email' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
-                      {accountType === 'email' ? '✉️ Email User' : '🔗 Wallet User'}
+                      {accountType === 'email' ? '✉️ Pengguna Email' : '🔗 Pengguna Wallet'}
                     </span>
                   </div>
                 </div>
@@ -293,7 +437,7 @@ const Profile = () => {
                     {/* Nama (Required) */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Nama Tampilan <span className="text-red-500">*</span>
+                        Nama Lengkap <span className="text-red-500">*</span>
                       </label>
                       {isEditing ? (
                         <div>
@@ -302,7 +446,7 @@ const Profile = () => {
                             value={editData.nama}
                             onChange={(e) => handleInputChange('nama', e.target.value)}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            placeholder="Masukkan nama tampilan"
+                            placeholder="Masukkan nama lengkap"
                             required
                           />
                           <p className="text-xs text-gray-500 mt-1">
@@ -367,6 +511,7 @@ const Profile = () => {
                       )}
                     </div>
 
+                    
                     {/* Wallet Address Section */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -448,7 +593,7 @@ const Profile = () => {
                             onClick={() => navigator.clipboard.writeText(walletAddress)}
                             className="text-blue-600 hover:text-blue-700 text-sm"
                           >
-                            Copy
+                            Salin
                           </button>
                           {accountType === 'email' && walletAddress && (
                             <button
@@ -556,7 +701,7 @@ const Profile = () => {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                     </svg>
                     <div>
-                      <h3 className="text-sm font-medium text-yellow-800">Perhatian untuk Email User</h3>
+                      <h3 className="text-sm font-medium text-yellow-800">Perhatian untuk Pengguna Email</h3>
                       <p className="text-sm text-yellow-700 mt-1">
                         Untuk melakukan pembelian atau penjualan, Anda perlu menghubungkan wallet MetaMask. 
                         Wallet ini akan digunakan untuk transaksi cryptocurrency.
