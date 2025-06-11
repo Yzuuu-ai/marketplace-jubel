@@ -1,17 +1,29 @@
 // server.js
 const express = require('express');
-const bodyParser = require('body-parser');
 const mysql = require('mysql');
 const bcrypt = require('bcryptjs');
-const cors = require('cors');
 
 const app = express();
 const port = 5000;
 
-app.use(cors());
-app.use(bodyParser.json());
+// Manual CORS middleware (menggantikan package cors)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  
+  next();
+});
 
-// Buat koneksi ke database
+// Body parser middleware
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Database connection
 const db = mysql.createConnection({
   host: 'localhost',
   user: 'root',
@@ -19,24 +31,27 @@ const db = mysql.createConnection({
   database: 'jubel_db'
 });
 
+// Connect to database
 db.connect(err => {
   if (err) {
-    console.error('Error connecting to MySQL: ' + err.stack);
+    console.error('Error connecting to MySQL:', err);
+    console.error('Make sure MySQL is running and database jubel_db exists');
     return;
   }
-  console.log('Connected to MySQL as id ' + db.threadId);
+  console.log('Connected to MySQL database');
 });
 
-// Helper function untuk normalize email
+// Helper functions
 const normalizeEmail = (email) => {
   return email ? email.trim().toLowerCase() : '';
 };
 
-// Endpoint registrasi dengan perbaikan
+// ===== USER AUTHENTICATION ENDPOINTS =====
+
+// Register endpoint
 app.post('/api/register', async (req, res) => {
   const { nama, email, password, nomor } = req.body;
 
-  // Validasi sederhana
   if (!nama || !email || !password) {
     return res.status(400).json({ 
       message: 'Nama, email, dan password wajib diisi',
@@ -48,13 +63,10 @@ app.post('/api/register', async (req, res) => {
     });
   }
 
-  // Normalize email
   const normalizedEmail = normalizeEmail(email);
-  
-  console.log('Register attempt for email:', normalizedEmail);
 
   try {
-    // Cek apakah email sudah terdaftar dengan normalisasi
+    // Check if email already exists
     const checkEmailQuery = 'SELECT * FROM users WHERE LOWER(TRIM(email)) = ?';
     db.query(checkEmailQuery, [normalizedEmail], (error, results) => {
       if (error) {
@@ -63,7 +75,6 @@ app.post('/api/register', async (req, res) => {
       }
 
       if (results.length > 0) {
-        console.log('Email already exists:', normalizedEmail);
         return res.status(400).json({ 
           message: 'Registrasi gagal',
           errors: { email: 'Email sudah terdaftar' } 
@@ -71,53 +82,38 @@ app.post('/api/register', async (req, res) => {
       }
 
       // Hash password
-      bcrypt.genSalt(10, (err, salt) => {
+      bcrypt.hash(password, 10, (err, hashedPassword) => {
         if (err) {
-          console.error('Error generating salt:', err);
+          console.error('Error hashing password:', err);
           return res.status(500).json({ message: 'Internal server error' });
         }
 
-        bcrypt.hash(password, salt, (err, hashedPassword) => {
-          if (err) {
-            console.error('Error hashing password:', err);
+        const newUser = {
+          name: nama,
+          email: normalizedEmail,
+          password: hashedPassword,
+          phone: nomor || null,
+          created_at: new Date(),
+          is_email_verified: 0,
+          account_type: 'email'
+        };
+
+        const insertQuery = 'INSERT INTO users SET ?';
+        db.query(insertQuery, newUser, (error, results) => {
+          if (error) {
+            console.error('Error inserting user:', error);
             return res.status(500).json({ message: 'Internal server error' });
           }
 
-          // Buat user baru dengan email yang sudah di-normalize
-          const newUser = {
-            name: nama,
-            email: normalizedEmail, // Gunakan normalized email
-            password: hashedPassword,
-            phone: nomor || null,
-            created_at: new Date(),
-            is_email_verified: 0,
-            account_type: 'email'
-          };
-
-          // Simpan ke database
-          const insertQuery = 'INSERT INTO users SET ?';
-          db.query(insertQuery, newUser, (error, results) => {
-            if (error) {
-              console.error('Error inserting user:', error);
-              return res.status(500).json({ message: 'Internal server error' });
-            }
-
-            console.log('User registered successfully:', {
+          res.status(201).json({ 
+            message: 'User registered successfully',
+            user: {
               id: results.insertId,
-              email: normalizedEmail,
-              name: nama
-            });
-            
-            res.status(201).json({ 
-              message: 'User registered successfully',
-              user: {
-                id: results.insertId,
-                name: newUser.name,
-                email: newUser.email,
-                phone: newUser.phone,
-                account_type: newUser.account_type
-              }
-            });
+              name: newUser.name,
+              email: newUser.email,
+              phone: newUser.phone,
+              account_type: newUser.account_type
+            }
           });
         });
       });
@@ -128,11 +124,10 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Endpoint login dengan perbaikan
+// Login endpoint
 app.post('/api/login', (req, res) => {
   const { email, password } = req.body;
 
-  // Validasi input
   if (!email || !password) {
     return res.status(400).json({ 
       message: 'Email dan password wajib diisi',
@@ -143,12 +138,8 @@ app.post('/api/login', (req, res) => {
     });
   }
 
-  // Normalize email
   const normalizedEmail = normalizeEmail(email);
-  
-  console.log('Login attempt for email:', normalizedEmail);
 
-  // Cari user berdasarkan email yang di-normalize
   const query = 'SELECT * FROM users WHERE LOWER(TRIM(email)) = ?';
   db.query(query, [normalizedEmail], (error, results) => {
     if (error) {
@@ -156,13 +147,7 @@ app.post('/api/login', (req, res) => {
       return res.status(500).json({ message: 'Internal server error' });
     }
 
-    console.log('Query results:', {
-      found: results.length > 0,
-      count: results.length
-    });
-
     if (results.length === 0) {
-      console.log('User not found for email:', normalizedEmail);
       return res.status(401).json({ 
         message: 'Login gagal',
         errors: { email: 'Email tidak terdaftar' } 
@@ -170,20 +155,12 @@ app.post('/api/login', (req, res) => {
     }
 
     const user = results[0];
-    console.log('User found:', {
-      id: user.id,
-      email: user.email,
-      name: user.name
-    });
 
-    // Verifikasi password
     bcrypt.compare(password, user.password, (err, isMatch) => {
       if (err) {
         console.error('Error comparing passwords:', err);
         return res.status(500).json({ message: 'Internal server error' });
       }
-
-      console.log('Password match result:', isMatch);
 
       if (!isMatch) {
         return res.status(401).json({ 
@@ -192,9 +169,6 @@ app.post('/api/login', (req, res) => {
         });
       }
 
-      console.log('Login successful for:', user.email);
-
-      // Jika login berhasil
       res.json({
         message: 'Login berhasil',
         user: {
@@ -209,7 +183,325 @@ app.post('/api/login', (req, res) => {
   });
 });
 
-// Endpoint untuk mengecek koneksi
+// ===== GAME ENDPOINTS =====
+
+// Get all games
+app.get('/api/games', (req, res) => {
+  const query = 'SELECT * FROM games ORDER BY id';
+  
+  db.query(query, (error, results) => {
+    if (error) {
+      console.error('Error fetching games:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Error fetching games' 
+      });
+    }
+    
+    res.json({
+      success: true,
+      games: results
+    });
+  });
+});
+
+// ===== GAME ACCOUNTS ENDPOINTS =====
+
+// Get game accounts with filters
+app.get('/api/game-accounts', (req, res) => {
+  const { sellerWallet, isAvailable, gameId, minPrice, maxPrice } = req.query;
+  
+  let query = 'SELECT ga.*, g.name as game_name FROM game_accounts ga JOIN games g ON ga.game_id = g.id WHERE 1=1';
+  const params = [];
+  
+  if (sellerWallet) {
+    query += ' AND ga.seller_wallet = ?';
+    params.push(sellerWallet);
+  }
+  
+  if (isAvailable === 'true') {
+    query += ' AND ga.is_sold = 0 AND ga.is_in_escrow = 0';
+  } else if (isAvailable === 'false') {
+    query += ' AND (ga.is_sold = 1 OR ga.is_in_escrow = 1)';
+  }
+  
+  if (gameId) {
+    query += ' AND ga.game_id = ?';
+    params.push(gameId);
+  }
+  
+  if (minPrice) {
+    query += ' AND ga.price >= ?';
+    params.push(parseFloat(minPrice));
+  }
+  
+  if (maxPrice) {
+    query += ' AND ga.price <= ?';
+    params.push(parseFloat(maxPrice));
+  }
+  
+  query += ' ORDER BY ga.created_at DESC';
+  
+  db.query(query, params, (error, results) => {
+    if (error) {
+      console.error('Error fetching game accounts:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Error fetching game accounts' 
+      });
+    }
+    
+    // Parse images JSON
+    const accounts = results.map(account => ({
+      ...account,
+      images: account.images ? JSON.parse(account.images) : [],
+      price: account.price + ' ETH'
+    }));
+    
+    res.json({
+      success: true,
+      accounts: accounts
+    });
+  });
+});
+
+// Get single game account
+app.get('/api/game-accounts/:id', (req, res) => {
+  const { id } = req.params;
+  
+  const query = `
+    SELECT ga.*, g.name as game_name 
+    FROM game_accounts ga 
+    JOIN games g ON ga.game_id = g.id 
+    WHERE ga.id = ?
+  `;
+  
+  db.query(query, [id], (error, results) => {
+    if (error) {
+      console.error('Error fetching game account:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Error fetching game account' 
+      });
+    }
+    
+    if (results.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Game account not found' 
+      });
+    }
+    
+    const account = results[0];
+    account.images = account.images ? JSON.parse(account.images) : [];
+    account.price = account.price + ' ETH';
+    
+    res.json({
+      success: true,
+      account: account
+    });
+  });
+});
+
+// Create new game account
+app.post('/api/game-accounts', (req, res) => {
+  const {
+    gameId, title, level, rank, price, description, images,
+    contactType, contactValue, sellerWallet, sellerId
+  } = req.body;
+  
+  // Validation
+  if (!gameId || !price || !contactValue || !sellerWallet) {
+    return res.status(400).json({
+      success: false,
+      message: 'GameId, price, contactValue, dan sellerWallet wajib diisi'
+    });
+  }
+  
+  const newAccount = {
+    game_id: gameId,
+    title: title || '',
+    level: level || null,
+    rank: rank || null,
+    price: parseFloat(price),
+    description: description || null,
+    images: JSON.stringify(images || []),
+    contact_type: contactType || 'whatsapp',
+    contact_value: contactValue,
+    seller_wallet: sellerWallet,
+    seller_id: sellerId || null
+  };
+  
+  const query = 'INSERT INTO game_accounts SET ?';
+  
+  db.query(query, newAccount, (error, results) => {
+    if (error) {
+      console.error('Error creating game account:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Error creating game account' 
+      });
+    }
+    
+    res.status(201).json({
+      success: true,
+      message: 'Game account created successfully',
+      accountId: results.insertId
+    });
+  });
+});
+
+// Update game account
+app.put('/api/game-accounts/:id', (req, res) => {
+  const { id } = req.params;
+  const {
+    gameId, title, level, rank, price, description, images,
+    contactType, contactValue
+  } = req.body;
+  
+  // First check if account exists and belongs to seller
+  const checkQuery = 'SELECT * FROM game_accounts WHERE id = ? AND seller_wallet = ?';
+  
+  db.query(checkQuery, [id, req.body.sellerWallet], (error, results) => {
+    if (error) {
+      console.error('Error checking game account:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Error checking game account' 
+      });
+    }
+    
+    if (results.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Game account not found or unauthorized' 
+      });
+    }
+    
+    if (results[0].is_sold || results[0].is_in_escrow) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Cannot edit sold or in-escrow accounts' 
+      });
+    }
+    
+    const updateData = {
+      game_id: gameId,
+      title: title || '',
+      level: level || null,
+      rank: rank || null,
+      price: parseFloat(price),
+      description: description || null,
+      images: JSON.stringify(images || []),
+      contact_type: contactType || 'whatsapp',
+      contact_value: contactValue
+    };
+    
+    const updateQuery = 'UPDATE game_accounts SET ? WHERE id = ?';
+    
+    db.query(updateQuery, [updateData, id], (error, results) => {
+      if (error) {
+        console.error('Error updating game account:', error);
+        return res.status(500).json({ 
+          success: false, 
+          message: 'Error updating game account' 
+        });
+      }
+      
+      res.json({
+        success: true,
+        message: 'Game account updated successfully'
+      });
+    });
+  });
+});
+
+// Delete game account
+app.delete('/api/game-accounts/:id', (req, res) => {
+  const { id } = req.params;
+  const { sellerWallet } = req.query;
+  
+  if (!sellerWallet) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Seller wallet is required' 
+    });
+  }
+  
+  // First check if account exists and belongs to seller
+  const checkQuery = 'SELECT * FROM game_accounts WHERE id = ? AND seller_wallet = ?';
+  
+  db.query(checkQuery, [id, sellerWallet], (error, results) => {
+    if (error) {
+      console.error('Error checking game account:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Error checking game account' 
+      });
+    }
+    
+    if (results.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Game account not found or unauthorized' 
+      });
+    }
+    
+    if (results[0].is_sold || results[0].is_in_escrow) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Cannot delete sold or in-escrow accounts' 
+      });
+    }
+    
+    const deleteQuery = 'DELETE FROM game_accounts WHERE id = ?';
+    
+    db.query(deleteQuery, [id], (error, results) => {
+      if (error) {
+        console.error('Error deleting game account:', error);
+        return res.status(500).json({ 
+          success: false, 
+          message: 'Error deleting game account' 
+        });
+      }
+      
+      res.json({
+        success: true,
+        message: 'Game account deleted successfully'
+      });
+    });
+  });
+});
+
+// Update account status (for escrow)
+app.patch('/api/game-accounts/:id/status', (req, res) => {
+  const { id } = req.params;
+  const { is_sold, is_in_escrow, escrow_id } = req.body;
+  
+  const updateData = {};
+  if (is_sold !== undefined) updateData.is_sold = is_sold;
+  if (is_in_escrow !== undefined) updateData.is_in_escrow = is_in_escrow;
+  if (escrow_id !== undefined) updateData.escrow_id = escrow_id;
+  
+  const query = 'UPDATE game_accounts SET ? WHERE id = ?';
+  
+  db.query(query, [updateData, id], (error, results) => {
+    if (error) {
+      console.error('Error updating account status:', error);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Error updating account status' 
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Account status updated successfully'
+    });
+  });
+});
+
+// Health check endpoint
 app.get('/api/health', (req, res) => {
   db.query('SELECT 1 + 1 AS solution', (error, results) => {
     if (error) {
@@ -227,224 +519,6 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// ===== ENDPOINT DEBUG (HAPUS DI PRODUCTION!) =====
-
-// Endpoint debug untuk melihat semua users
-app.get('/api/debug/users', (req, res) => {
-  const query = 'SELECT id, name, email, phone, created_at, account_type FROM users ORDER BY created_at DESC';
-  db.query(query, (error, results) => {
-    if (error) {
-      console.error('Error fetching users:', error);
-      return res.status(500).json({ message: 'Internal server error' });
-    }
-    
-    console.log('Total users in database:', results.length);
-    results.forEach(user => {
-      console.log(`User: ${user.email} (ID: ${user.id}, Name: ${user.name})`);
-    });
-    
-    res.json({
-      totalUsers: results.length,
-      users: results
-    });
-  });
-});
-
-// Endpoint untuk cek email specific
-app.post('/api/debug/check-email', (req, res) => {
-  const { email } = req.body;
-  
-  if (!email) {
-    return res.status(400).json({ message: 'Email is required' });
-  }
-  
-  const normalizedEmail = normalizeEmail(email);
-  console.log('Checking email:', email, '-> normalized:', normalizedEmail);
-  
-  const queries = [
-    {
-      name: 'exact',
-      query: 'SELECT id, email, name FROM users WHERE email = ?',
-      params: [email]
-    },
-    {
-      name: 'trimmed',
-      query: 'SELECT id, email, name FROM users WHERE TRIM(email) = TRIM(?)',
-      params: [email]
-    },
-    {
-      name: 'lowercase',
-      query: 'SELECT id, email, name FROM users WHERE LOWER(email) = LOWER(?)',
-      params: [email]
-    },
-    {
-      name: 'normalized',
-      query: 'SELECT id, email, name FROM users WHERE LOWER(TRIM(email)) = ?',
-      params: [normalizedEmail]
-    },
-    {
-      name: 'like',
-      query: 'SELECT id, email, name FROM users WHERE email LIKE ?',
-      params: [`%${email}%`]
-    }
-  ];
-  
-  const results = {};
-  let completed = 0;
-  
-  queries.forEach(({ name, query, params }) => {
-    db.query(query, params, (error, queryResults) => {
-      if (error) {
-        results[name] = { error: error.message };
-      } else {
-        results[name] = {
-          found: queryResults.length > 0,
-          count: queryResults.length,
-          data: queryResults
-        };
-      }
-      
-      completed++;
-      if (completed === queries.length) {
-        res.json({
-          searchEmail: email,
-          normalizedEmail: normalizedEmail,
-          results
-        });
-      }
-    });
-  });
-});
-
-// Endpoint untuk cleanup email (trim spasi)
-app.post('/api/debug/cleanup-emails', (req, res) => {
-  const updateQuery = 'UPDATE users SET email = TRIM(LOWER(email))';
-  
-  db.query(updateQuery, (error, results) => {
-    if (error) {
-      console.error('Error cleaning up emails:', error);
-      return res.status(500).json({ message: 'Error cleaning up emails', error: error.message });
-    }
-    
-    console.log('Emails cleaned up:', results.affectedRows);
-    res.json({
-      message: 'Email cleanup completed',
-      affectedRows: results.affectedRows
-    });
-  });
-});
-
-// Endpoint untuk melihat struktur tabel
-app.get('/api/debug/table-structure', (req, res) => {
-  const query = 'DESCRIBE users';
-  
-  db.query(query, (error, results) => {
-    if (error) {
-      console.error('Error getting table structure:', error);
-      return res.status(500).json({ message: 'Error getting table structure', error: error.message });
-    }
-    
-    res.json({
-      tableName: 'users',
-      structure: results
-    });
-  });
-});
-
-// Middleware
-app.use(bodyParser.json());
-
-// API: Mendapatkan semua akun game
-app.get('/api/game-accounts', (req, res) => {
-  const { sellerWallet, isAvailable } = req.query;
-  
-  // Query untuk mengambil akun berdasarkan status dan dompet seller
-  const query = `
-    SELECT * FROM game_accounts
-    WHERE seller_wallet = ? AND (is_sold = ? OR is_in_escrow = ?)
-  `;
-  
-  db.query(query, [sellerWallet, isAvailable === 'true' ? 0 : 1, isAvailable === 'escrow' ? 1 : 0], (err, results) => {
-    if (err) {
-      console.error('Error fetching game accounts:', err);
-      return res.status(500).json({ success: false, message: 'Error fetching data' });
-    }
-    res.json({ success: true, accounts: results });
-  });
-});
-
-// API: Membuat akun game baru
-app.post('/api/game-accounts', (req, res) => {
-  const {
-    gameId, title, level, rank, price, description, images,
-    contactType, contactValue, sellerWallet, sellerId
-  } = req.body;
-
-  const query = `
-    INSERT INTO game_accounts (game_id, title, level, rank, price, description, images,
-      contact_type, contact_value, seller_wallet, seller_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `;
-  
-  db.query(query, [gameId, title, level, rank, price, description, JSON.stringify(images),
-    contactType, contactValue, sellerWallet, sellerId], (err, results) => {
-    if (err) {
-      console.error('Error inserting game account:', err);
-      return res.status(500).json({ success: false, message: 'Error inserting data' });
-    }
-    res.json({ success: true, message: 'Akun game berhasil dibuat!' });
-  });
-});
-
-// API: Memperbarui akun game
-app.put('/api/game-accounts/:id', (req, res) => {
-  const accountId = req.params.id;
-  const {
-    gameId, title, level, rank, price, description, images,
-    contactType, contactValue
-  } = req.body;
-
-  const query = `
-    UPDATE game_accounts
-    SET game_id = ?, title = ?, level = ?, rank = ?, price = ?, description = ?, images = ?,
-        contact_type = ?, contact_value = ?
-    WHERE id = ?
-  `;
-  
-  db.query(query, [gameId, title, level, rank, price, description, JSON.stringify(images),
-    contactType, contactValue, accountId], (err, results) => {
-    if (err) {
-      console.error('Error updating game account:', err);
-      return res.status(500).json({ success: false, message: 'Error updating data' });
-    }
-    res.json({ success: true, message: 'Akun game berhasil diperbarui!' });
-  });
-});
-
-// API: Menghapus akun game
-app.delete('/api/game-accounts/:id', (req, res) => {
-  const accountId = req.params.id;
-
-  const query = `
-    DELETE FROM game_accounts WHERE id = ?
-  `;
-  
-  db.query(query, [accountId], (err, results) => {
-    if (err) {
-      console.error('Error deleting game account:', err);
-      return res.status(500).json({ success: false, message: 'Error deleting data' });
-    }
-    res.json({ success: true, message: 'Akun game berhasil dihapus!' });
-  });
-});
-
-// Server berjalan di port 5000
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
-});
-
-// ===== END DEBUG ENDPOINTS =====
-
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
@@ -457,13 +531,20 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
-  console.log('Available endpoints:');
-  console.log('- POST /api/register');
-  console.log('- POST /api/login');
-  console.log('- GET  /api/health');
-  console.log('Debug endpoints (remove in production):');
-  console.log('- GET  /api/debug/users');
-  console.log('- POST /api/debug/check-email');
-  console.log('- POST /api/debug/cleanup-emails');
-  console.log('- GET  /api/debug/table-structure');
+  console.log('Database connected to jubel_db');
+  console.log('\nAvailable endpoints:');
+  console.log('Authentication:');
+  console.log('- POST   /api/register');
+  console.log('- POST   /api/login');
+  console.log('\nGames:');
+  console.log('- GET    /api/games');
+  console.log('\nGame Accounts:');
+  console.log('- GET    /api/game-accounts');
+  console.log('- GET    /api/game-accounts/:id');
+  console.log('- POST   /api/game-accounts');
+  console.log('- PUT    /api/game-accounts/:id');
+  console.log('- DELETE /api/game-accounts/:id');
+  console.log('- PATCH  /api/game-accounts/:id/status');
+  console.log('\nOther:');
+  console.log('- GET    /api/health');
 });

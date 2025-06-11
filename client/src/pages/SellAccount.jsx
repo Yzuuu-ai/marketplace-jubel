@@ -28,6 +28,7 @@ const SellAccount = () => {
   const [error, setError] = useState('');
   const [previewImages, setPreviewImages] = useState([]);
   const [myListings, setMyListings] = useState([]);
+  const [allMyListings, setAllMyListings] = useState([]);
   const [filterStatus, setFilterStatus] = useState('all');
 
   // Fetch games from API
@@ -39,10 +40,19 @@ const SellAccount = () => {
         
         if (data.success) {
           setGames(data.games);
+        } else {
+          // Fallback data if API fails
+          setGames([
+            { id: 1, name: 'Mobile Legends', code: 'ML', image: '/images/games/ml.jpg' },
+            { id: 2, name: 'PUBG Mobile', code: 'PUBG', image: '/images/games/pubg.jpg' },
+            { id: 3, name: 'Free Fire', code: 'FF', image: '/images/games/ff.jpg' },
+            { id: 4, name: 'Genshin Impact', code: 'GI', image: '/images/games/genshin.jpg' }
+          ]);
         }
       } catch (error) {
         console.error('Error fetching games:', error);
-        setGames([  // Fallback to local games if the API fails
+        // Fallback data if API fails
+        setGames([
           { id: 1, name: 'Mobile Legends', code: 'ML', image: '/images/games/ml.jpg' },
           { id: 2, name: 'PUBG Mobile', code: 'PUBG', image: '/images/games/pubg.jpg' },
           { id: 3, name: 'Free Fire', code: 'FF', image: '/images/games/ff.jpg' },
@@ -67,13 +77,18 @@ const SellAccount = () => {
     return `${game.code}-${nextNumber.toString().padStart(3, '0')}`;
   }, [games]);
 
-  // Fetch listings from API
+  // Fetch all listings from API
   const getMyListings = useCallback(async () => {
     try {
-      const response = await fetch(
-        `http://localhost:5000/api/game-accounts?sellerWallet=${walletAddress}&isAvailable=${filterStatus === 'available'}`
-      );
+      console.log('Fetching listings for wallet:', walletAddress);
+      
+      const url = `http://localhost:5000/api/game-accounts?sellerWallet=${walletAddress}`;
+      console.log('API URL:', url);
+      
+      const response = await fetch(url);
       const data = await response.json();
+      
+      console.log('API Response:', data);
       
       if (data.success) {
         let accounts = data.accounts;
@@ -93,35 +108,45 @@ const SellAccount = () => {
           return account;
         });
         
-        // Apply filters
-        if (filterStatus === 'available') {
-          return accountsWithEscrow.filter(acc => !acc.is_sold && !acc.is_in_escrow);
-        } else if (filterStatus === 'sold') {
-          return accountsWithEscrow.filter(acc => acc.is_sold);
-        } else if (filterStatus === 'escrow') {
-          return accountsWithEscrow.filter(acc => acc.is_in_escrow);
-        }
-        
         return accountsWithEscrow;
       }
       
+      console.error('API returned success: false', data);
       return [];
     } catch (error) {
       console.error('Error fetching listings:', error);
       return [];
     }
-  }, [walletAddress, filterStatus, escrowTransactions]);
+  }, [walletAddress, escrowTransactions]);
 
   const refreshListings = useCallback(async () => {
+    console.log('Refreshing listings...');
     const listings = await getMyListings();
-    setMyListings(listings);
-  }, [getMyListings]);
+    console.log('Got listings:', listings);
+    
+    // Update both all listings and filtered listings
+    setAllMyListings(listings);
+    
+    // Apply client-side filters based on filterStatus
+    let filteredListings = listings;
+    if (filterStatus === 'available') {
+      filteredListings = listings.filter(acc => !acc.is_sold && !acc.is_in_escrow);
+    } else if (filterStatus === 'sold') {
+      filteredListings = listings.filter(acc => acc.is_sold);
+    } else if (filterStatus === 'escrow') {
+      filteredListings = listings.filter(acc => acc.is_in_escrow);
+    }
+    
+    setMyListings(filteredListings);
+  }, [getMyListings, filterStatus]);
 
+  // Refresh listings when activeTab or walletAddress changes
   useEffect(() => {
-    if (activeTab === 'list') {
+    if (activeTab === 'list' && walletAddress) {
+      console.log('Tab changed to list, refreshing...');
       refreshListings();
     }
-  }, [activeTab, refreshListings]);
+  }, [activeTab, walletAddress, refreshListings]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -175,7 +200,6 @@ const SellAccount = () => {
     setPreviewImages(newPreviews);
   };
 
-  // Handle form submission with API
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
@@ -190,23 +214,30 @@ const SellAccount = () => {
       const session = JSON.parse(localStorage.getItem('currentSession') || '{}');
       const sellerId = session.userId || null;
       
+      // Debug log
+      console.log('Submitting with wallet:', walletAddress);
+      console.log('Form data:', formData);
+      
       const apiData = {
         gameId: parseInt(formData.gameId),
         title: formData.title,
-        level: formData.level,
-        rank: formData.rank,
+        level: formData.level || null,
+        rank: formData.rank || null,
         price: parseFloat(formData.price),
-        description: formData.description,
-        images: formData.images,
+        description: formData.description || null,
+        images: formData.images || [],
         contactType: formData.contactType,
         contactValue: formData.contactValue,
         sellerWallet: walletAddress,
         sellerId: sellerId
       };
 
+      console.log('API data being sent:', apiData);
+
       let response;
       if (isEditing) {
         // Update existing account
+        apiData.sellerWallet = walletAddress; // Ensure sellerWallet is included for PUT
         response = await fetch(`http://localhost:5000/api/game-accounts/${editingAccountId}`, {
           method: 'PUT',
           headers: {
@@ -226,6 +257,7 @@ const SellAccount = () => {
       }
 
       const data = await response.json();
+      console.log('Server response:', data);
 
       if (!response.ok) {
         throw new Error(data.message || 'Gagal menyimpan akun');
@@ -248,7 +280,9 @@ const SellAccount = () => {
       setEditingAccountId(null);
 
       setSuccess(true);
-      refreshListings();
+      
+      // Immediately refresh listings
+      await refreshListings();
       
       setTimeout(() => {
         setSuccess(false);
@@ -257,15 +291,15 @@ const SellAccount = () => {
         }
       }, 2000);
     } catch (err) {
+      console.error('Submit error:', err);
       setError(err.message || 'Terjadi kesalahan saat menyimpan akun');
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Handle account deletion with API
   const handleDelete = async (id) => {
-    const account = myListings.find(acc => acc.id === id);
+    const account = allMyListings.find(acc => acc.id === id);
     if (account.is_in_escrow) {
       alert('Tidak dapat menghapus akun yang sedang dalam proses escrow');
       return;
@@ -314,12 +348,12 @@ const SellAccount = () => {
     setActiveTab('sell');
   };
 
-  // Calculate account statistics
+  // Calculate account statistics from all listings
   const getAccountStats = useCallback(() => {
-    const total = myListings.length;
-    const available = myListings.filter(acc => !acc.is_sold && !acc.is_in_escrow).length;
-    const sold = myListings.filter(acc => acc.is_sold).length;
-    const inEscrow = myListings.filter(acc => acc.is_in_escrow).length;
+    const total = allMyListings.length;
+    const available = allMyListings.filter(acc => !acc.is_sold && !acc.is_in_escrow).length;
+    const sold = allMyListings.filter(acc => acc.is_sold).length;
+    const inEscrow = allMyListings.filter(acc => acc.is_in_escrow).length;
     
     return {
       total,
@@ -327,7 +361,7 @@ const SellAccount = () => {
       sold,
       inEscrow
     };
-  }, [myListings]);
+  }, [allMyListings]);
 
   const stats = getAccountStats();
 
@@ -442,7 +476,6 @@ const SellAccount = () => {
                   )}
                   
                   <form onSubmit={handleSubmit}>
-                    {/* Image Upload Section */}
                     <div className="mb-6">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Gambar Akun <span className="text-gray-500">(Maks. 5 gambar)</span>
@@ -486,7 +519,6 @@ const SellAccount = () => {
                       </div>
                     </div>
 
-                    {/* Basic Information */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                       <div>
                         <label htmlFor="gameId" className="block text-sm font-medium text-gray-700 mb-1">
@@ -528,7 +560,6 @@ const SellAccount = () => {
                       </div>
                     </div>
                     
-                    {/* Game Details */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                       <div>
                         <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
@@ -576,7 +607,6 @@ const SellAccount = () => {
                       </div>
                     </div>
                     
-                    {/* Description */}
                     <div className="mb-6">
                       <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
                         Deskripsi
@@ -592,7 +622,6 @@ const SellAccount = () => {
                       ></textarea>
                     </div>
                     
-                    {/* Contact Information */}
                     <div className="mb-6 bg-blue-50 p-4 rounded-lg">
                       <h3 className="text-sm font-medium text-gray-700 mb-3">
                         Informasi Kontak <span className="text-red-500">*</span>
@@ -704,7 +733,6 @@ const SellAccount = () => {
                   const game = games.find(g => g.id === account.game_id);
                   const contactInfo = getContactDisplay(account);
                   
-
                   return (
                     <div key={account.id} className="bg-white rounded-lg shadow p-4">
                       <div className="flex items-center justify-between">
@@ -724,7 +752,6 @@ const SellAccount = () => {
                         <div className="flex items-center gap-2">
                           {account.is_in_escrow && account.escrowStatus && getEscrowStatusBadge(account)}
                           
-
                           {account.is_sold ? (
                             <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
                               Terjual
@@ -755,7 +782,6 @@ const SellAccount = () => {
                         </div>
                       </div>
                       
-                      {/* Contact Info */}
                       {contactInfo && (
                         <div className="mt-3 pt-3 border-t">
                           <span className="text-sm text-gray-600">{contactInfo}</span>
