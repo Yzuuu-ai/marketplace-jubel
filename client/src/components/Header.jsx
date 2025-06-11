@@ -13,6 +13,7 @@ const Header = () => {
     walletAddress,
     logout,
     forceDisconnect,
+    permanentWalletDisconnect,
     connectionMethod,
     wasManuallyDisconnected,
     profileData,
@@ -37,6 +38,33 @@ const Header = () => {
     setShowOptions(false);
     if (window.confirm('Ini akan menghapus semua data lokal dan memaksa logout. Lanjutkan?')) {
       forceDisconnect();
+    }
+  };
+
+  const handleClearLogoutState = () => {
+    setShowOptions(false);
+    if (window.confirm('Ini akan menghapus status logout manual. Wallet akan auto-connect kembali. Lanjutkan?')) {
+      localStorage.removeItem('walletManuallyDisconnected');
+      localStorage.removeItem('lastDisconnectedWallet');
+      localStorage.removeItem('walletPermanentlyDisconnected');
+      window.location.reload();
+    }
+  };
+
+  const handlePermanentDisconnect = async () => {
+    setShowOptions(false);
+    if (window.confirm('Ini akan memutus koneksi wallet secara PERMANEN. Wallet tidak akan auto-connect lagi sampai Anda clear logout state. Lanjutkan?')) {
+      if (permanentWalletDisconnect) {
+        await permanentWalletDisconnect();
+      } else {
+        // Fallback if function not available
+        localStorage.setItem('walletManuallyDisconnected', 'true');
+        localStorage.setItem('walletPermanentlyDisconnected', 'true');
+        if (walletAddress) {
+          localStorage.setItem('lastDisconnectedWallet', walletAddress);
+        }
+        logout();
+      }
     }
   };
 
@@ -179,14 +207,34 @@ const Header = () => {
                     </button>
                     
                     {accountType === 'wallet' && (
-                      <button onClick={handleForceLogout} className="w-full text-left px-4 py-2 text-red-600 hover:bg-red-50">
-                        <div className="flex items-center gap-2">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                          </svg>
-                          Force Logout
-                        </div>
-                      </button>
+                      <>
+                        {wasManuallyDisconnected() && (
+                          <button onClick={handleClearLogoutState} className="w-full text-left px-4 py-2 text-blue-600 hover:bg-blue-50">
+                            <div className="flex items-center gap-2">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                              </svg>
+                              Clear Logout State
+                            </div>
+                          </button>
+                        )}
+                        <button onClick={handlePermanentDisconnect} className="w-full text-left px-4 py-2 text-orange-600 hover:bg-orange-50">
+                          <div className="flex items-center gap-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636m12.728 12.728L18 21l-2.636-2.636M6 6l2.636 2.636" />
+                            </svg>
+                            Permanent Disconnect
+                          </div>
+                        </button>
+                        <button onClick={handleForceLogout} className="w-full text-left px-4 py-2 text-red-600 hover:bg-red-50">
+                          <div className="flex items-center gap-2">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                            </svg>
+                            Force Logout
+                          </div>
+                        </button>
+                      </>
                     )}
                   </div>
                   <div className="fixed inset-0 z-40" onClick={() => setShowOptions(false)} />

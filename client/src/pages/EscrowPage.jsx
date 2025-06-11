@@ -1,5 +1,5 @@
-// src/pages/EscrowPage.jsx - Simplified Design
-import React, { useState } from 'react';
+// src/pages/EscrowPage.jsx - Database Connected Version
+import React, { useState, useEffect } from 'react';
 import Header from '../components/Header';
 import SellerDeliveryModal from '../components/SellerDeliveryModal';
 import BuyerConfirmationModal from '../components/BuyerConfirmationModal';
@@ -216,9 +216,12 @@ const EscrowPage = () => {
   const { walletAddress } = useAuth();
   const { 
     escrowTransactions, 
+    isLoading,
+    error,
     deliverAccount, 
     confirmReceipt, 
-    createDispute 
+    createDispute,
+    loadEscrowTransactions
   } = useAdmin();
 
   const [activeTab, setActiveTab] = useState('as_buyer');
@@ -228,10 +231,44 @@ const EscrowPage = () => {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [filterStatus, setFilterStatus] = useState('all');
 
-  const transactionsWithUser = escrowTransactions.map(t => ({
-    ...t,
-    currentUserWallet: walletAddress
-  }));
+  // Load escrow transactions on component mount
+  useEffect(() => {
+    if (walletAddress) {
+      loadEscrowTransactions(walletAddress);
+    }
+  }, [walletAddress]); // Remove loadEscrowTransactions from dependencies to avoid infinite loop
+
+  // Transform database transactions to match component expectations
+  const transactionsWithUser = (escrowTransactions || []).map(t => {
+    // Safe JSON parsing helper
+    const parseJsonSafely = (jsonData, defaultValue = null) => {
+      if (!jsonData) return defaultValue;
+      if (typeof jsonData === 'object') return jsonData; // Already parsed
+      try {
+        return JSON.parse(jsonData);
+      } catch (error) {
+        console.error('Error parsing JSON:', error.message, 'Data:', jsonData);
+        return defaultValue;
+      }
+    };
+
+    // Safe data transformation with fallbacks
+    return {
+      id: t.id || '',
+      accountTitle: t.account_title || 'Unknown Account',
+      gameName: t.game_name || 'Unknown Game',
+      priceETH: t.amount || 0,
+      sellerWallet: t.seller_wallet || '',
+      buyerWallet: t.buyer_wallet || '',
+      status: t.status || ESCROW_STATUS.PENDING_PAYMENT,
+      createdAt: t.created_at ? new Date(t.created_at).getTime() : Date.now(),
+      timeline: parseJsonSafely(t.timeline, []),
+      deliveryProof: parseJsonSafely(t.delivery_proof, null),
+      buyerConfirmation: parseJsonSafely(t.buyer_confirmation, null),
+      accountDetails: parseJsonSafely(t.account_details, null),
+      currentUserWallet: walletAddress
+    };
+  });
 
   const handleAction = (action, transaction) => {
     setSelectedTransaction(transaction);
@@ -253,25 +290,40 @@ const EscrowPage = () => {
 
   const handleDeliverAccount = async (deliveryData) => {
     if (selectedTransaction) {
-      await deliverAccount(selectedTransaction.id, deliveryData);
-      setShowDeliveryModal(false);
-      setSelectedTransaction(null);
+      try {
+        await deliverAccount(selectedTransaction.id, deliveryData);
+        setShowDeliveryModal(false);
+        setSelectedTransaction(null);
+      } catch (error) {
+        console.error('Error delivering account:', error);
+        alert('Gagal mengirim detail akun. Silakan coba lagi.');
+      }
     }
   };
 
   const handleConfirmReceipt = async (confirmationData) => {
     if (selectedTransaction) {
-      await confirmReceipt(selectedTransaction.id, confirmationData);
-      setShowConfirmationModal(false);
-      setSelectedTransaction(null);
+      try {
+        await confirmReceipt(selectedTransaction.id, confirmationData);
+        setShowConfirmationModal(false);
+        setSelectedTransaction(null);
+      } catch (error) {
+        console.error('Error confirming receipt:', error);
+        alert('Gagal mengkonfirmasi penerimaan. Silakan coba lagi.');
+      }
     }
   };
 
   const handleCreateDispute = async (disputeReason) => {
     if (selectedTransaction) {
-      await createDispute(selectedTransaction.id, disputeReason, 'buyer');
-      setShowConfirmationModal(false);
-      setSelectedTransaction(null);
+      try {
+        await createDispute(selectedTransaction.id, disputeReason, 'buyer');
+        setShowConfirmationModal(false);
+        setSelectedTransaction(null);
+      } catch (error) {
+        console.error('Error creating dispute:', error);
+        alert('Gagal membuat sengketa. Silakan coba lagi.');
+      }
     }
   };
 
@@ -331,7 +383,31 @@ const EscrowPage = () => {
           </select>
         </div>
 
-        {activeTab === 'as_buyer' && (
+        {/* Loading State */}
+        {isLoading ? (
+          <div className="flex justify-center items-center py-20">
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent"></div>
+            <p className="ml-4 text-gray-600">Memuat transaksi escrow...</p>
+          </div>
+        ) : error ? (
+          <div className="text-center py-20">
+            <div className="bg-red-50 border border-red-200 rounded-xl shadow-lg p-12 max-w-md mx-auto">
+              <div className="text-6xl mb-4">⚠️</div>
+              <h3 className="text-xl font-bold text-red-800 mb-2">
+                Terjadi Kesalahan
+              </h3>
+              <p className="text-red-600 mb-6">
+                {error}
+              </p>
+              <button
+                onClick={() => loadEscrowTransactions(walletAddress)}
+                className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 transition"
+              >
+                Coba Lagi
+              </button>
+            </div>
+          </div>
+        ) : activeTab === 'as_buyer' && (
           <div>
             {buyerTransactions.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -356,7 +432,7 @@ const EscrowPage = () => {
           </div>
         )}
         
-        {activeTab === 'as_seller' && (
+        {!isLoading && !error && activeTab === 'as_seller' && (
           <div>
             {sellerTransactions.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

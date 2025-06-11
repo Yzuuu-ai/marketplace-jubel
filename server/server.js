@@ -25,6 +25,9 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// Serve static files from uploads directory
+app.use('/uploads', express.static('uploads'));
+
 // Database connection
 const db = mysql.createConnection({
   host: process.env.DB_HOST || 'localhost',
@@ -319,12 +322,37 @@ app.get('/api/game-accounts', (req, res) => {
       });
     }
     
-    // Parse images JSON
-    const accounts = results.map(account => ({
-      ...account,
-      images: account.images ? JSON.parse(account.images) : [],
-      price: account.price + ' ETH'
-    }));
+    // Parse images JSON with error handling
+    const accounts = results.map(account => {
+      let images = [];
+      if (account.images) {
+        try {
+          // Check if it's already a JSON string
+          if (typeof account.images === 'string') {
+            // If it starts with data:image, it's a base64 string, wrap it in an array
+            if (account.images.startsWith('data:image')) {
+              images = [account.images];
+            } else {
+              // Try to parse as JSON
+              images = JSON.parse(account.images);
+            }
+          } else if (Array.isArray(account.images)) {
+            images = account.images;
+          }
+        } catch (error) {
+          console.error('Error parsing images for account', account.id, ':', error.message);
+          console.log('Images data:', account.images);
+          // If parsing fails, treat as single image string
+          images = [account.images];
+        }
+      }
+      
+      return {
+        ...account,
+        images: images,
+        price: account.price + ' ETH'
+      };
+    });
     
     console.log('Mengirim response dengan', accounts.length, 'akun');
     
@@ -366,7 +394,31 @@ app.get('/api/game-accounts/:id', (req, res) => {
     }
     
     const account = results[0];
-    account.images = account.images ? JSON.parse(account.images) : [];
+    
+    // Parse images with error handling
+    let images = [];
+    if (account.images) {
+      try {
+        if (typeof account.images === 'string') {
+          // If it starts with data:image, it's a base64 string, wrap it in an array
+          if (account.images.startsWith('data:image')) {
+            images = [account.images];
+          } else {
+            // Try to parse as JSON
+            images = JSON.parse(account.images);
+          }
+        } else if (Array.isArray(account.images)) {
+          images = account.images;
+        }
+      } catch (error) {
+        console.error('Error parsing images for account', account.id, ':', error.message);
+        console.log('Images data:', account.images);
+        // If parsing fails, treat as single image string
+        images = [account.images];
+      }
+    }
+    
+    account.images = images;
     account.price = account.price + ' ETH';
     
     res.json({
@@ -1094,7 +1146,7 @@ app.get('/api/wallet-profile/:wallet_address', (req, res) => {
 });
 
 // Create or update wallet profile
-app.post('/api/wallet-profile', (req, res) => {
+app.post('/api/wallet-profile', async (req, res) => {
   const { wallet_address, name, email, phone } = req.body;
   
   console.log('Wallet profile update request:', { wallet_address, name, email, phone });
@@ -1111,6 +1163,59 @@ app.post('/api/wallet-profile', (req, res) => {
       success: false,
       message: 'Format alamat wallet tidak valid'
     });
+  }
+  
+  // Validate email-wallet combination if email is provided
+  if (email && email.trim()) {
+    try {
+      const { validateEmailWalletCombination, mergeWalletWithEmailAccount } = require('./middleware/emailWalletValidation');
+      
+      const validation = await validateEmailWalletCombination(email, wallet_address, 'update');
+      
+      if (!validation.isValid) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validasi gagal',
+          errors: validation.errors,
+          warnings: validation.warnings
+        });
+      }
+      
+      // If email exists in users table and wallet matches, merge the accounts
+      if (validation.emailCheck.existsInUsers && validation.emailCheck.userRecord) {
+        const userRecord = validation.emailCheck.userRecord;
+        
+        // Check if this wallet should be merged with email account
+        if (!userRecord.wallet_address || userRecord.wallet_address === wallet_address) {
+          try {
+            const mergeResult = await mergeWalletWithEmailAccount(email, wallet_address);
+            
+            return res.json({
+              success: true,
+              message: 'Akun wallet berhasil digabung dengan akun email',
+              merged: true,
+              user: mergeResult.user,
+              note: 'Silakan login ulang menggunakan email untuk mengakses akun yang telah digabung'
+            });
+          } catch (mergeError) {
+            console.error('Error merging accounts:', mergeError);
+            // Continue with normal wallet profile update if merge fails
+          }
+        }
+      }
+      
+      // Show warnings if any
+      if (validation.warnings.length > 0) {
+        console.warn('Wallet profile warnings:', validation.warnings);
+      }
+      
+    } catch (validationError) {
+      console.error('Error validating email-wallet combination:', validationError);
+      return res.status(500).json({
+        success: false,
+        message: 'Gagal memvalidasi data: ' + validationError.message
+      });
+    }
   }
   
   const profileData = {
@@ -1188,6 +1293,911 @@ app.get('/api/profile/activities', authenticateToken, (req, res) => {
   });
 });
 
+// Check for existing accounts with same email/wallet
+app.post('/api/profile/check-conflicts', async (req, res) => {
+  const { email, wallet_address } = req.body;
+  
+  if (!email && !wallet_address) {
+    return res.status(400).json({
+      success: false,
+      message: 'Email atau wallet address harus diisi'
+    });
+  }
+  
+  try {
+    const { checkEmailExists, checkWalletExists } = require('./middleware/emailWalletValidation');
+    
+    const conflicts = {
+      email_conflicts: null,
+      wallet_conflicts: null,
+      can_merge: false,
+      merge_suggestions: []
+    };
+    
+    if (email) {
+      conflicts.email_conflicts = await checkEmailExists(email);
+    }
+    
+    if (wallet_address) {
+      conflicts.wallet_conflicts = await checkWalletExists(wallet_address);
+    }
+    
+    // Check if accounts can be merged
+    if (email && wallet_address) {
+      const emailCheck = conflicts.email_conflicts;
+      const walletCheck = conflicts.wallet_conflicts;
+      
+      // Case 1: Email exists in users, wallet exists in wallet_profiles
+      if (emailCheck.existsInUsers && walletCheck.existsInWalletProfiles) {
+        const userRecord = emailCheck.userRecord;
+        const walletRecord = walletCheck.walletRecord;
+        
+        if (!userRecord.wallet_address) {
+          conflicts.can_merge = true;
+          conflicts.merge_suggestions.push({
+            type: 'merge_wallet_to_email',
+            description: `Gabungkan profil wallet (${walletRecord.name}) dengan akun email (${userRecord.name})`,
+            primary_account: 'email',
+            data: {
+              email_account: userRecord,
+              wallet_account: walletRecord
+            }
+          });
+        }
+      }
+      
+      // Case 2: Same email in both systems
+      if (emailCheck.existsInUsers && emailCheck.existsInWalletProfiles) {
+        conflicts.merge_suggestions.push({
+          type: 'resolve_email_conflict',
+          description: 'Email yang sama ditemukan di sistem email dan wallet',
+          requires_manual_resolution: true
+        });
+      }
+    }
+    
+    res.json({
+      success: true,
+      conflicts,
+      has_conflicts: conflicts.email_conflicts?.existsInUsers || 
+                    conflicts.email_conflicts?.existsInWalletProfiles ||
+                    conflicts.wallet_conflicts?.existsInUsers ||
+                    conflicts.wallet_conflicts?.existsInConnectedWallets ||
+                    conflicts.wallet_conflicts?.existsInWalletProfiles
+    });
+    
+  } catch (error) {
+    console.error('Error checking conflicts:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Gagal memeriksa konflik: ' + error.message
+    });
+  }
+});
+
+// Merge accounts endpoint
+app.post('/api/profile/merge-accounts', async (req, res) => {
+  const { email, wallet_address, merge_type } = req.body;
+  
+  if (!email || !wallet_address || !merge_type) {
+    return res.status(400).json({
+      success: false,
+      message: 'Email, wallet address, dan merge type wajib diisi'
+    });
+  }
+  
+  try {
+    const { mergeWalletWithEmailAccount } = require('./middleware/emailWalletValidation');
+    
+    if (merge_type === 'merge_wallet_to_email') {
+      const result = await mergeWalletWithEmailAccount(email, wallet_address);
+      
+      res.json({
+        success: true,
+        message: 'Akun berhasil digabung',
+        merged_account: result.user,
+        note: 'Gunakan email dan password untuk login ke akun yang telah digabung'
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: 'Tipe merge tidak didukung'
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error merging accounts:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Gagal menggabungkan akun: ' + error.message
+    });
+  }
+});
+
+// ===== ESCROW TRANSACTION ENDPOINTS =====
+
+// Escrow status constants
+const ESCROW_STATUS = {
+  PENDING_PAYMENT: 'pending_payment',
+  PAYMENT_RECEIVED: 'payment_received',
+  ACCOUNT_DELIVERED: 'account_delivered',
+  BUYER_CONFIRMED: 'buyer_confirmed',
+  COMPLETED: 'completed',
+  DISPUTED: 'disputed',
+  REFUNDED: 'refunded',
+  CANCELLED: 'cancelled'
+};
+
+// Generate unique escrow ID
+const generateEscrowId = () => {
+  return 'escrow_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+};
+
+// Safe JSON parsing helper
+const parseJsonSafely = (jsonString, defaultValue = null) => {
+  if (!jsonString) return defaultValue;
+  try {
+    if (typeof jsonString === 'string') {
+      return JSON.parse(jsonString);
+    }
+    return jsonString; // Already parsed
+  } catch (error) {
+    console.error('Error parsing JSON:', error.message, 'Data:', jsonString);
+    return defaultValue;
+  }
+};
+
+// Create escrow transaction
+app.post('/api/escrow/create', (req, res) => {
+  const {
+    accountId,
+    accountTitle,
+    gameName,
+    sellerWallet,
+    buyerWallet,
+    amount,
+    currency = 'ETH',
+    amountIdr,
+    exchangeRate,
+    paymentHash,
+    network,
+    accountDetails
+  } = req.body;
+
+  console.log('📝 Creating escrow transaction:', {
+    accountId, accountTitle, sellerWallet, buyerWallet, amount
+  });
+
+  if (!accountId || !accountTitle || !sellerWallet || !buyerWallet || !amount) {
+    return res.status(400).json({
+      success: false,
+      message: 'Missing required fields'
+    });
+  }
+
+  const escrowId = generateEscrowId();
+  const escrowWallet = process.env.ESCROW_WALLET || '0xe14fcb0fdb1256445dc6ddd876225a8fad9d211f';
+
+  try {
+    // Create initial timeline
+    const timeline = [
+      {
+        status: ESCROW_STATUS.PENDING_PAYMENT,
+        timestamp: Date.now(),
+        note: 'Escrow transaction created, waiting for payment confirmation'
+      }
+    ];
+
+    // If payment hash exists, add payment received status
+    if (paymentHash) {
+      timeline.push({
+        status: ESCROW_STATUS.PAYMENT_RECEIVED,
+        timestamp: Date.now() + 1000,
+        note: `Payment received. Hash: ${paymentHash}`
+      });
+    }
+
+    const escrowData = {
+      id: escrowId,
+      account_id: accountId,
+      account_title: accountTitle,
+      game_name: gameName,
+      seller_wallet: sellerWallet,
+      buyer_wallet: buyerWallet,
+      escrow_wallet: escrowWallet,
+      amount: parseFloat(amount),
+      currency: currency,
+      amount_idr: amountIdr ? parseFloat(amountIdr) : null,
+      exchange_rate: exchangeRate ? parseFloat(exchangeRate) : null,
+      status: paymentHash ? ESCROW_STATUS.PAYMENT_RECEIVED : ESCROW_STATUS.PENDING_PAYMENT,
+      payment_hash: paymentHash || null,
+      network: network || null,
+      account_details: JSON.stringify(accountDetails || {}),
+      timeline: JSON.stringify(timeline),
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours from now
+      created_at: new Date(),
+      updated_at: new Date()
+    };
+
+    const insertQuery = 'INSERT INTO escrow_transactions SET ?';
+    
+    db.query(insertQuery, escrowData, (error, results) => {
+      if (error) {
+        console.error('❌ Error creating escrow transaction:', error);
+        return res.status(500).json({
+          success: false,
+          message: 'Error creating escrow transaction: ' + error.message
+        });
+      }
+
+      console.log('✅ Escrow transaction created successfully:', escrowId);
+
+      // Update game account status
+      const updateAccountQuery = 'UPDATE game_accounts SET is_in_escrow = TRUE, escrow_id = ? WHERE id = ?';
+      db.query(updateAccountQuery, [escrowId, accountId], (updateError) => {
+        if (updateError) {
+          console.error('⚠️ Error updating account status:', updateError);
+        }
+      });
+
+      // Add to transaction history
+      const historyData = {
+        escrow_id: escrowId,
+        action: paymentHash ? 'payment_received' : 'created',
+        actor_wallet: buyerWallet,
+        actor_type: 'buyer',
+        description: paymentHash ? 'Payment received' : 'Escrow transaction created',
+        created_at: new Date()
+      };
+
+      const historyQuery = 'INSERT INTO transaction_history SET ?';
+      db.query(historyQuery, historyData, (historyError) => {
+        if (historyError) {
+          console.error('⚠️ Error adding transaction history:', historyError);
+        }
+      });
+
+      res.status(201).json({
+        success: true,
+        message: 'Escrow transaction created successfully',
+        escrow_id: escrowId,
+        escrow: {
+          ...escrowData,
+          timeline: timeline
+        }
+      });
+    });
+
+  } catch (error) {
+    console.error('❌ Error in createEscrow:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error: ' + error.message
+    });
+  }
+});
+
+// Get escrow transactions
+app.get('/api/escrow/transactions', (req, res) => {
+  const { wallet_address, status, role } = req.query;
+
+  let query = 'SELECT * FROM escrow_transactions WHERE 1=1';
+  const params = [];
+
+  if (wallet_address) {
+    if (role === 'seller') {
+      query += ' AND seller_wallet = ?';
+      params.push(wallet_address);
+    } else if (role === 'buyer') {
+      query += ' AND buyer_wallet = ?';
+      params.push(wallet_address);
+    } else {
+      query += ' AND (seller_wallet = ? OR buyer_wallet = ?)';
+      params.push(wallet_address, wallet_address);
+    }
+  }
+
+  if (status) {
+    query += ' AND status = ?';
+    params.push(status);
+  }
+
+  query += ' ORDER BY created_at DESC';
+
+  db.query(query, params, (error, results) => {
+    if (error) {
+      console.error('❌ Error fetching escrow transactions:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching escrow transactions: ' + error.message
+      });
+    }
+
+    // Parse JSON fields with error handling
+    const transactions = results.map(tx => {
+      const parseJsonSafely = (jsonString, defaultValue = null) => {
+        if (!jsonString) return defaultValue;
+        try {
+          if (typeof jsonString === 'string') {
+            return JSON.parse(jsonString);
+          }
+          return jsonString; // Already parsed
+        } catch (error) {
+          console.error('Error parsing JSON:', error.message, 'Data:', jsonString);
+          return defaultValue;
+        }
+      };
+
+      return {
+        ...tx,
+        account_details: parseJsonSafely(tx.account_details, {}),
+        timeline: parseJsonSafely(tx.timeline, []),
+        delivery_proof: parseJsonSafely(tx.delivery_proof, null),
+        buyer_confirmation: parseJsonSafely(tx.buyer_confirmation, null),
+        metadata: parseJsonSafely(tx.metadata, null)
+      };
+    });
+
+    res.json({
+      success: true,
+      transactions: transactions
+    });
+  });
+});
+
+// Get single escrow transaction
+app.get('/api/escrow/:id', (req, res) => {
+  const { id } = req.params;
+
+  const query = 'SELECT * FROM escrow_transactions WHERE id = ?';
+  
+  db.query(query, [id], (error, results) => {
+    if (error) {
+      console.error('❌ Error fetching escrow transaction:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching escrow transaction: ' + error.message
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Escrow transaction not found'
+      });
+    }
+
+    const transaction = results[0];
+    
+    // Parse JSON fields with error handling
+    const parseJsonSafely = (jsonString, defaultValue = null) => {
+      if (!jsonString) return defaultValue;
+      try {
+        if (typeof jsonString === 'string') {
+          return JSON.parse(jsonString);
+        }
+        return jsonString; // Already parsed
+      } catch (error) {
+        console.error('Error parsing JSON:', error.message, 'Data:', jsonString);
+        return defaultValue;
+      }
+    };
+
+    const parsedTransaction = {
+      ...transaction,
+      account_details: parseJsonSafely(transaction.account_details, {}),
+      timeline: parseJsonSafely(transaction.timeline, []),
+      delivery_proof: parseJsonSafely(transaction.delivery_proof, null),
+      buyer_confirmation: parseJsonSafely(transaction.buyer_confirmation, null),
+      metadata: parseJsonSafely(transaction.metadata, null)
+    };
+
+    res.json({
+      success: true,
+      transaction: parsedTransaction
+    });
+  });
+});
+
+// Confirm payment (admin)
+app.patch('/api/escrow/:id/confirm-payment', (req, res) => {
+  const { id } = req.params;
+  const { payment_hash, admin_wallet } = req.body;
+
+  const updateData = {
+    status: ESCROW_STATUS.PAYMENT_RECEIVED,
+    payment_hash: payment_hash,
+    updated_at: new Date()
+  };
+
+  const query = 'UPDATE escrow_transactions SET ? WHERE id = ?';
+  
+  db.query(query, [updateData, id], (error) => {
+    if (error) {
+      console.error('❌ Error confirming payment:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error confirming payment: ' + error.message
+      });
+    }
+
+    // Add to transaction history
+    const historyData = {
+      escrow_id: id,
+      action: 'payment_received',
+      actor_wallet: admin_wallet,
+      actor_type: 'admin',
+      description: 'Payment confirmed by admin',
+      created_at: new Date()
+    };
+
+    const historyQuery = 'INSERT INTO transaction_history SET ?';
+    db.query(historyQuery, historyData, (historyError) => {
+      if (historyError) {
+        console.error('⚠️ Error adding transaction history:', historyError);
+      }
+    });
+
+    console.log('✅ Payment confirmed for escrow:', id);
+
+    res.json({
+      success: true,
+      message: 'Payment confirmed successfully'
+    });
+  });
+});
+
+// Deliver account (seller)
+app.patch('/api/escrow/:id/deliver', (req, res) => {
+  console.log('🔄 DELIVER ENDPOINT CALLED with ID:', req.params.id);
+  console.log('📦 Request body:', req.body);
+  const { id } = req.params;
+  const { delivery_data } = req.body;
+
+  // Get current transaction to update timeline
+  const getQuery = 'SELECT * FROM escrow_transactions WHERE id = ?';
+  
+  db.query(getQuery, [id], (error, results) => {
+    if (error) {
+      console.error('❌ Error fetching escrow transaction:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching escrow transaction: ' + error.message
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Escrow transaction not found'
+      });
+    }
+
+    const currentTx = results[0];
+    
+    // Safe JSON parsing for timeline
+    const currentTimeline = parseJsonSafely(currentTx.timeline, []);
+
+    // Add delivery timeline entry
+    const newTimelineEntry = {
+      status: ESCROW_STATUS.ACCOUNT_DELIVERED,
+      timestamp: Date.now(),
+      note: 'Account details delivered to buyer'
+    };
+
+    const updatedTimeline = [...currentTimeline, newTimelineEntry];
+
+    const deliveryProof = {
+      ...delivery_data,
+      delivered_at: Date.now()
+    };
+
+    const updateData = {
+      status: ESCROW_STATUS.ACCOUNT_DELIVERED,
+      delivery_proof: JSON.stringify(deliveryProof),
+      timeline: JSON.stringify(updatedTimeline),
+      updated_at: new Date()
+    };
+
+    const updateQuery = 'UPDATE escrow_transactions SET ? WHERE id = ?';
+    
+    db.query(updateQuery, [updateData, id], (updateError) => {
+      if (updateError) {
+        console.error('❌ Error delivering account:', updateError);
+        return res.status(500).json({
+          success: false,
+          message: 'Error delivering account: ' + updateError.message
+        });
+      }
+
+      // Add to transaction history
+      const historyData = {
+        escrow_id: id,
+        action: 'account_delivered',
+        actor_wallet: currentTx.seller_wallet,
+        actor_type: 'seller',
+        description: 'Account details delivered to buyer',
+        created_at: new Date()
+      };
+
+      const historyQuery = 'INSERT INTO transaction_history SET ?';
+      db.query(historyQuery, historyData, (historyError) => {
+        if (historyError) {
+          console.error('⚠️ Error adding transaction history:', historyError);
+        }
+      });
+
+      console.log('✅ Account delivered for escrow:', id);
+
+      res.json({
+        success: true,
+        message: 'Account delivered successfully'
+      });
+    });
+  });
+});
+
+// Confirm receipt (buyer)
+app.patch('/api/escrow/:id/confirm-receipt', (req, res) => {
+  const { id } = req.params;
+  const { confirmation_data } = req.body;
+
+  // Get current transaction to update timeline
+  const getQuery = 'SELECT * FROM escrow_transactions WHERE id = ?';
+  
+  db.query(getQuery, [id], (error, results) => {
+    if (error) {
+      console.error('❌ Error fetching escrow transaction:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching escrow transaction: ' + error.message
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Escrow transaction not found'
+      });
+    }
+
+    const currentTx = results[0];
+    
+    // Safe JSON parsing for timeline
+    const currentTimeline = parseJsonSafely(currentTx.timeline, []);
+
+    // Add confirmation timeline entry
+    const newTimelineEntry = {
+      status: ESCROW_STATUS.BUYER_CONFIRMED,
+      timestamp: Date.now(),
+      note: confirmation_data.satisfied 
+        ? 'Buyer confirmed receipt - satisfied'
+        : 'Buyer confirmed receipt with notes'
+    };
+
+    const updatedTimeline = [...currentTimeline, newTimelineEntry];
+
+    const buyerConfirmation = {
+      ...confirmation_data,
+      confirmed_at: Date.now()
+    };
+
+    const updateData = {
+      status: ESCROW_STATUS.BUYER_CONFIRMED,
+      buyer_confirmation: JSON.stringify(buyerConfirmation),
+      timeline: JSON.stringify(updatedTimeline),
+      updated_at: new Date()
+    };
+
+    const updateQuery = 'UPDATE escrow_transactions SET ? WHERE id = ?';
+    
+    db.query(updateQuery, [updateData, id], (updateError) => {
+      if (updateError) {
+        console.error('❌ Error confirming receipt:', updateError);
+        return res.status(500).json({
+          success: false,
+          message: 'Error confirming receipt: ' + updateError.message
+        });
+      }
+
+      // Add to transaction history
+      const historyData = {
+        escrow_id: id,
+        action: 'buyer_confirmed',
+        actor_wallet: currentTx.buyer_wallet,
+        actor_type: 'buyer',
+        description: confirmation_data.satisfied 
+          ? 'Buyer confirmed receipt - satisfied'
+          : 'Buyer confirmed receipt with notes',
+        created_at: new Date()
+      };
+
+      const historyQuery = 'INSERT INTO transaction_history SET ?';
+      db.query(historyQuery, historyData, (historyError) => {
+        if (historyError) {
+          console.error('⚠️ Error adding transaction history:', historyError);
+        }
+      });
+
+      console.log('✅ Receipt confirmed for escrow:', id);
+
+      res.json({
+        success: true,
+        message: 'Receipt confirmed successfully'
+      });
+    });
+  });
+});
+
+// Create dispute
+app.post('/api/escrow/:id/dispute', (req, res) => {
+  const { id } = req.params;
+  const { reason, dispute_by } = req.body;
+
+  // Get current transaction to update timeline
+  const getQuery = 'SELECT * FROM escrow_transactions WHERE id = ?';
+  
+  db.query(getQuery, [id], (error, results) => {
+    if (error) {
+      console.error('❌ Error fetching escrow transaction:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching escrow transaction: ' + error.message
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Escrow transaction not found'
+      });
+    }
+
+    const currentTx = results[0];
+    const currentTimeline = parseJsonSafely(currentTx.timeline, []);
+
+    // Add dispute timeline entry
+    const newTimelineEntry = {
+      status: ESCROW_STATUS.DISPUTED,
+      timestamp: Date.now(),
+      note: `Dispute created by ${dispute_by}: ${reason}`
+    };
+
+    const updatedTimeline = [...currentTimeline, newTimelineEntry];
+
+    const disputeId = `dispute_${Date.now()}`;
+
+    const updateData = {
+      status: ESCROW_STATUS.DISPUTED,
+      dispute_reason: reason,
+      dispute_by: dispute_by,
+      dispute_id: disputeId,
+      timeline: JSON.stringify(updatedTimeline),
+      updated_at: new Date()
+    };
+
+    const updateQuery = 'UPDATE escrow_transactions SET ? WHERE id = ?';
+    
+    db.query(updateQuery, [updateData, id], (updateError) => {
+      if (updateError) {
+        console.error('❌ Error creating dispute:', updateError);
+        return res.status(500).json({
+          success: false,
+          message: 'Error creating dispute: ' + updateError.message
+        });
+      }
+
+      // Add to transaction history
+      const historyData = {
+        escrow_id: id,
+        action: 'disputed',
+        actor_wallet: dispute_by === 'buyer' ? currentTx.buyer_wallet : currentTx.seller_wallet,
+        actor_type: dispute_by,
+        description: `Dispute created: ${reason}`,
+        created_at: new Date()
+      };
+
+      const historyQuery = 'INSERT INTO transaction_history SET ?';
+      db.query(historyQuery, historyData, (historyError) => {
+        if (historyError) {
+          console.error('⚠️ Error adding transaction history:', historyError);
+        }
+      });
+
+      console.log('⚠️ Dispute created for escrow:', id);
+
+      res.json({
+        success: true,
+        message: 'Dispute created successfully',
+        dispute_id: disputeId
+      });
+    });
+  });
+});
+
+// Release funds (admin)
+app.patch('/api/escrow/:id/release', (req, res) => {
+  const { id } = req.params;
+  const { admin_payment_hash, admin_wallet } = req.body;
+
+  // Get current transaction to update timeline
+  const getQuery = 'SELECT * FROM escrow_transactions WHERE id = ?';
+  
+  db.query(getQuery, [id], (error, results) => {
+    if (error) {
+      console.error('❌ Error fetching escrow transaction:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching escrow transaction: ' + error.message
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Escrow transaction not found'
+      });
+    }
+
+    const currentTx = results[0];
+    const currentTimeline = parseJsonSafely(currentTx.timeline, []);
+
+    // Add completion timeline entry
+    const newTimelineEntry = {
+      status: ESCROW_STATUS.COMPLETED,
+      timestamp: Date.now(),
+      note: `Funds released to seller by admin. Payment hash: ${admin_payment_hash}`
+    };
+
+    const updatedTimeline = [...currentTimeline, newTimelineEntry];
+
+    const updateData = {
+      status: ESCROW_STATUS.COMPLETED,
+      admin_payment_hash: admin_payment_hash,
+      timeline: JSON.stringify(updatedTimeline),
+      completed_at: new Date(),
+      updated_at: new Date()
+    };
+
+    const updateQuery = 'UPDATE escrow_transactions SET ? WHERE id = ?';
+    
+    db.query(updateQuery, [updateData, id], (updateError) => {
+      if (updateError) {
+        console.error('❌ Error releasing funds:', updateError);
+        return res.status(500).json({
+          success: false,
+          message: 'Error releasing funds: ' + updateError.message
+        });
+      }
+
+      // Mark account as sold
+      const updateAccountQuery = 'UPDATE game_accounts SET is_sold = TRUE, is_in_escrow = FALSE, sold_at = NOW() WHERE escrow_id = ?';
+      db.query(updateAccountQuery, [id], (accountError) => {
+        if (accountError) {
+          console.error('⚠️ Error updating account status:', accountError);
+        }
+      });
+
+      // Add to transaction history
+      const historyData = {
+        escrow_id: id,
+        action: 'completed',
+        actor_wallet: admin_wallet,
+        actor_type: 'admin',
+        description: `Funds released to seller. Payment hash: ${admin_payment_hash}`,
+        created_at: new Date()
+      };
+
+      const historyQuery = 'INSERT INTO transaction_history SET ?';
+      db.query(historyQuery, historyData, (historyError) => {
+        if (historyError) {
+          console.error('⚠️ Error adding transaction history:', historyError);
+        }
+      });
+
+      console.log('💰 Funds released for escrow:', id);
+
+      res.json({
+        success: true,
+        message: 'Funds released successfully'
+      });
+    });
+  });
+});
+
+// Resolve dispute (admin)
+app.patch('/api/escrow/:id/resolve-dispute', (req, res) => {
+  const { id } = req.params;
+  const { resolution, refund = false, admin_payment_hash, admin_wallet } = req.body;
+
+  // Get current transaction to update timeline
+  const getQuery = 'SELECT * FROM escrow_transactions WHERE id = ?';
+  
+  db.query(getQuery, [id], (error, results) => {
+    if (error) {
+      console.error('❌ Error fetching escrow transaction:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Error fetching escrow transaction: ' + error.message
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Escrow transaction not found'
+      });
+    }
+
+    const currentTx = results[0];
+    const currentTimeline = currentTx.timeline ? JSON.parse(currentTx.timeline) : [];
+
+    const newStatus = refund ? ESCROW_STATUS.REFUNDED : ESCROW_STATUS.COMPLETED;
+
+    // Add resolution timeline entry
+    const newTimelineEntry = {
+      status: newStatus,
+      timestamp: Date.now(),
+      note: `Dispute resolved: ${resolution}${admin_payment_hash ? `. Payment hash: ${admin_payment_hash}` : ''}`
+    };
+
+    const updatedTimeline = [...currentTimeline, newTimelineEntry];
+
+    const updateData = {
+      status: newStatus,
+      resolution: resolution,
+      admin_payment_hash: admin_payment_hash,
+      timeline: JSON.stringify(updatedTimeline),
+      completed_at: new Date(),
+      updated_at: new Date()
+    };
+
+    const updateQuery = 'UPDATE escrow_transactions SET ? WHERE id = ?';
+    
+    db.query(updateQuery, [updateData, id], (updateError) => {
+      if (updateError) {
+        console.error('❌ Error resolving dispute:', updateError);
+        return res.status(500).json({
+          success: false,
+          message: 'Error resolving dispute: ' + updateError.message
+        });
+      }
+
+      // Update account status
+      const updateAccountQuery = 'UPDATE game_accounts SET is_sold = ?, is_in_escrow = FALSE WHERE escrow_id = ?';
+      db.query(updateAccountQuery, [!refund, id], (accountError) => {
+        if (accountError) {
+          console.error('⚠️ Error updating account status:', accountError);
+        }
+      });
+
+      // Add to transaction history
+      const historyData = {
+        escrow_id: id,
+        action: refund ? 'refunded' : 'resolved',
+        actor_wallet: admin_wallet,
+        actor_type: 'admin',
+        description: `Dispute resolved: ${resolution}`,
+        created_at: new Date()
+      };
+
+      const historyQuery = 'INSERT INTO transaction_history SET ?';
+      db.query(historyQuery, historyData, (historyError) => {
+        if (historyError) {
+          console.error('⚠️ Error adding transaction history:', historyError);
+        }
+      });
+
+      console.log('⚖️ Dispute resolved for escrow:', id);
+
+      res.json({
+        success: true,
+        message: 'Dispute resolved successfully'
+      });
+    });
+  });
+});
+
 // Start server
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
@@ -1214,6 +2224,16 @@ app.listen(port, () => {
   console.log('- PUT    /api/game-accounts/:id (protected)');
   console.log('- DELETE /api/game-accounts/:id (protected)');
   console.log('- PATCH  /api/game-accounts/:id/status');
+  console.log('\nEscrow Transactions:');
+  console.log('- POST   /api/escrow/create');
+  console.log('- GET    /api/escrow/transactions');
+  console.log('- GET    /api/escrow/:id');
+  console.log('- PATCH  /api/escrow/:id/confirm-payment');
+  console.log('- PATCH  /api/escrow/:id/deliver (protected)');
+  console.log('- PATCH  /api/escrow/:id/confirm-receipt (protected)');
+  console.log('- POST   /api/escrow/:id/dispute (protected)');
+  console.log('- PATCH  /api/escrow/:id/release');
+  console.log('- PATCH  /api/escrow/:id/resolve-dispute');
   console.log('\nOther:');
   console.log('- GET    /api/health');
 });

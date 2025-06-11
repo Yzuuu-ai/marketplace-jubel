@@ -138,14 +138,17 @@ const BuyerConfirmationModal = ({ escrowTransaction, onClose, onConfirm, onDispu
         <div className="bg-gray-50 p-4 rounded-lg mb-6">
           <h3 className="font-semibold text-gray-800 mb-2">Deskripsi Akun Original</h3>
           <div className="text-sm text-gray-700 space-y-1">
-            {escrowTransaction.accountDetails.level && (
+            {escrowTransaction.accountDetails?.level && (
               <p><strong>Level:</strong> {escrowTransaction.accountDetails.level}</p>
             )}
-            {escrowTransaction.accountDetails.rank && (
+            {escrowTransaction.accountDetails?.rank && (
               <p><strong>Rank:</strong> {escrowTransaction.accountDetails.rank}</p>
             )}
-            {escrowTransaction.accountDetails.description && (
+            {escrowTransaction.accountDetails?.description && (
               <p><strong>Deskripsi:</strong> {escrowTransaction.accountDetails.description}</p>
+            )}
+            {!escrowTransaction.accountDetails && (
+              <p className="text-gray-500 italic">Detail akun tidak tersedia</p>
             )}
           </div>
         </div>

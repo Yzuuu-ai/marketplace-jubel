@@ -180,12 +180,12 @@ const Login = () => {
             const walletData = await walletResponse.json();
             if (walletData.success) {
               // Wallet has standalone profile, login as wallet user
-              const sessionData = {
-                walletAddress,
-                accountType: 'wallet',
-                loginAt: new Date().toISOString()
-              };
-              localStorage.setItem('currentSession', JSON.stringify(sessionData));
+              // DON'T save session to localStorage for wallet users
+              // Let AuthContext handle the wallet connection
+              
+              // Clear any manual disconnect flags since user is manually logging in
+              localStorage.removeItem('walletManuallyDisconnected');
+              localStorage.removeItem('lastDisconnectedWallet');
               
               await login(walletAddress);
               navigate('/');

@@ -36,10 +36,50 @@ const AdminBlockchainPayment = ({ transaction, action, onPaymentComplete, onCanc
   const [currentNetwork, setCurrentNetwork] = useState('');
   const [canCancel, setCanCancel] = useState(true);
 
+  // Debug logging
+  console.log('🔍 AdminBlockchainPayment received:', {
+    transaction,
+    action,
+    walletAddress
+  });
+
   const isRefund = action === 'refund';
-  const recipientWallet = isRefund ? transaction.buyerWallet : transaction.sellerWallet;
+  
+  // Handle different field names for wallet addresses
+  const buyerWallet = transaction.buyerWallet || transaction.buyer_wallet;
+  const sellerWallet = transaction.sellerWallet || transaction.seller_wallet;
+  
+  const recipientWallet = isRefund ? buyerWallet : sellerWallet;
   const recipientLabel = isRefund ? 'Buyer' : 'Seller';
-  const paymentAmount = transaction.priceETH;
+  const paymentAmount = transaction.priceETH || transaction.amount;
+
+  // Additional validation
+  console.log('💰 Payment details:', {
+    isRefund,
+    recipientWallet,
+    recipientLabel,
+    paymentAmount,
+    buyerWallet,
+    sellerWallet,
+    originalBuyerWallet: transaction.buyerWallet,
+    originalSellerWallet: transaction.sellerWallet,
+    originalBuyer_wallet: transaction.buyer_wallet,
+    originalSeller_wallet: transaction.seller_wallet
+  });
+
+  // Early validation with fallback field names
+  if (!transaction || !buyerWallet || !sellerWallet || !paymentAmount) {
+    console.error('❌ Missing required transaction data:', {
+      transaction: !!transaction,
+      buyerWallet: !!buyerWallet,
+      sellerWallet: !!sellerWallet,
+      paymentAmount: !!paymentAmount,
+      originalBuyerWallet: !!transaction?.buyerWallet,
+      originalSellerWallet: !!transaction?.sellerWallet,
+      originalBuyer_wallet: !!transaction?.buyer_wallet,
+      originalSeller_wallet: !!transaction?.seller_wallet
+    });
+  }
 
   // Auto-detect network based on buyer's payment network
   const getPaymentNetwork = useCallback(() => {
@@ -142,15 +182,134 @@ const AdminBlockchainPayment = ({ transaction, action, onPaymentComplete, onCanc
     setCanCancel(false); // Disable cancel during processing
     
     try {
-      // Convert ETH to Wei
-      const amountInWei = '0x' + (parseFloat(paymentAmount) * Math.pow(10, 18)).toString(16);
+      console.log('🚀 Starting payment process...');
+      console.log('📋 Raw transaction data:', {
+        transaction,
+        action,
+        walletAddress,
+        recipientWallet,
+        paymentAmount
+      });
+
+      // Validate recipient wallet address
+      console.log('🔍 Validating recipient wallet:', recipientWallet);
+      if (!recipientWallet) {
+        throw new Error('Recipient wallet address is missing');
+      }
+      if (typeof recipientWallet !== 'string') {
+        throw new Error('Recipient wallet address must be a string');
+      }
+      if (!recipientWallet.startsWith('0x')) {
+        throw new Error('Recipient wallet address must start with 0x');
+      }
+      if (recipientWallet.length !== 42) {
+        throw new Error(`Recipient wallet address must be 42 characters, got ${recipientWallet.length}`);
+      }
+
+      // Validate sender wallet address
+      console.log('🔍 Validating sender wallet:', walletAddress);
+      if (!walletAddress) {
+        throw new Error('Sender wallet address is missing');
+      }
+      if (typeof walletAddress !== 'string') {
+        throw new Error('Sender wallet address must be a string');
+      }
+      if (!walletAddress.startsWith('0x')) {
+        throw new Error('Sender wallet address must start with 0x');
+      }
+      if (walletAddress.length !== 42) {
+        throw new Error(`Sender wallet address must be 42 characters, got ${walletAddress.length}`);
+      }
+
+      // Convert ETH to Wei (ensure proper conversion)
+      console.log('💰 Converting payment amount:', paymentAmount);
+      const amountInEth = parseFloat(paymentAmount);
+      if (isNaN(amountInEth)) {
+        throw new Error(`Payment amount is not a valid number: ${paymentAmount}`);
+      }
+      if (amountInEth <= 0) {
+        throw new Error(`Payment amount must be positive: ${amountInEth}`);
+      }
+
+      // Convert to Wei using simple and reliable method
+      // For most practical amounts (< 1000 ETH), this will work fine
+      const weiMultiplier = 1000000000000000000; // 10^18
+      const amountInWei = Math.round(amountInEth * weiMultiplier);
+      
+      // Convert to hex string
+      let amountInWeiHex;
+      if (amountInWei === 0) {
+        throw new Error('Payment amount converts to zero Wei');
+      }
+      
+      // Use toString(16) for hex conversion
+      amountInWeiHex = '0x' + amountInWei.toString(16);
+      
+      console.log('🔄 Payment conversion:', {
+        amountInEth,
+        weiMultiplier,
+        amountInWei,
+        amountInWeiHex,
+        isSafeInteger: Number.isSafeInteger(amountInWei),
+        // Test conversion back to ETH for verification
+        backToEth: amountInWei / weiMultiplier
+      });
+      
+      // Additional validation
+      if (!Number.isSafeInteger(amountInWei)) {
+        throw new Error(`Amount too large for safe conversion: ${amountInEth} ETH. Please use smaller amounts.`);
+      }
+
+      // Create transaction parameters with explicit validation
+      // Use checksum addresses for better compatibility
+      const checksumTo = recipientWallet; // Keep original case for checksum
+      const checksumFrom = walletAddress; // Keep original case for checksum
       
       const transactionParameters = {
-        to: recipientWallet,
-        from: walletAddress,
-        value: amountInWei,
-        gas: '0x5208', // 21000 gas limit for simple transfer
+        to: checksumTo,
+        from: checksumFrom,
+        value: amountInWeiHex,
+        // Remove gas parameter to let MetaMask estimate
+        // gas: '0x5208', 
       };
+
+      console.log('📤 Final transaction parameters:', transactionParameters);
+
+      // Double-check parameters before sending
+      if (!transactionParameters.to || transactionParameters.to.length !== 42) {
+        throw new Error(`Invalid "to" address: ${transactionParameters.to}`);
+      }
+      if (!transactionParameters.from || transactionParameters.from.length !== 42) {
+        throw new Error(`Invalid "from" address: ${transactionParameters.from}`);
+      }
+      if (!transactionParameters.value || transactionParameters.value === '0x0' || transactionParameters.value === '0x') {
+        throw new Error(`Invalid "value": ${transactionParameters.value}`);
+      }
+      
+      // Validate hex format
+      if (!transactionParameters.value.startsWith('0x')) {
+        throw new Error(`Value must be hex format: ${transactionParameters.value}`);
+      }
+
+      console.log('✅ All validations passed, checking MetaMask connection...');
+
+      // Check if MetaMask is connected and on the right network
+      const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+      console.log('🔗 Connected accounts:', accounts);
+      
+      const currentChainId = await window.ethereum.request({ method: 'eth_chainId' });
+      console.log('🌐 Current chain ID:', currentChainId);
+      console.log('🎯 Expected chain ID:', NETWORKS[selectedNetwork].chainId);
+      
+      if (accounts.length === 0) {
+        throw new Error('No MetaMask accounts connected');
+      }
+      
+      if (currentChainId !== NETWORKS[selectedNetwork].chainId) {
+        throw new Error(`Wrong network. Expected ${NETWORKS[selectedNetwork].name} (${NETWORKS[selectedNetwork].chainId}), but got ${currentChainId}`);
+      }
+
+      console.log('🚀 Sending transaction to MetaMask...');
 
       // Request transaction
       const txHash = await window.ethereum.request({
@@ -158,6 +317,7 @@ const AdminBlockchainPayment = ({ transaction, action, onPaymentComplete, onCanc
         params: [transactionParameters],
       });
 
+      console.log('✅ Transaction sent successfully:', txHash);
       setTransactionHash(txHash);
       setPaymentStep(3);
       
@@ -165,13 +325,21 @@ const AdminBlockchainPayment = ({ transaction, action, onPaymentComplete, onCanc
       monitorTransaction(txHash);
       
     } catch (error) {
-      console.error('Payment error:', error);
+      console.error('❌ Payment error details:', {
+        error,
+        message: error.message,
+        code: error.code,
+        stack: error.stack
+      });
+      
       setPaymentStatus('failed');
       setIsProcessing(false);
       setCanCancel(true); // Re-enable cancel on error
       
       if (error.code === 4001) {
         alert('Transaksi dibatalkan oleh user');
+      } else if (error.message.includes('Invalid transaction params')) {
+        alert(`Parameter transaksi tidak valid: ${error.message}\n\nPastikan:\n- Alamat wallet benar\n- Saldo mencukupi\n- Network sesuai`);
       } else {
         alert('Gagal mengirim transaksi: ' + error.message);
       }
@@ -575,6 +743,42 @@ const AdminBlockchainPayment = ({ transaction, action, onPaymentComplete, onCanc
       )}
     </div>
   );
+
+  // Show error if transaction data is invalid
+  if (!transaction || !buyerWallet || !sellerWallet || !paymentAmount) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
+          <div className="text-center">
+            <h2 className="text-xl font-bold text-red-800 mb-4">Error: Data Transaksi Tidak Valid</h2>
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+              <p className="text-red-700 text-sm">
+                Data transaksi yang diperlukan tidak lengkap:
+              </p>
+              <ul className="text-red-600 text-xs mt-2 space-y-1">
+                {!transaction && <li>• Transaction object missing</li>}
+                {!buyerWallet && <li>• Buyer wallet address missing (checked: buyerWallet, buyer_wallet)</li>}
+                {!sellerWallet && <li>• Seller wallet address missing (checked: sellerWallet, seller_wallet)</li>}
+                {!paymentAmount && <li>• Payment amount missing (checked: priceETH, amount)</li>}
+              </ul>
+              <div className="mt-3 p-2 bg-gray-100 rounded text-xs">
+                <p className="font-medium">Debug Info:</p>
+                <p>buyerWallet: {buyerWallet || 'null'}</p>
+                <p>sellerWallet: {sellerWallet || 'null'}</p>
+                <p>paymentAmount: {paymentAmount || 'null'}</p>
+              </div>
+            </div>
+            <button
+              onClick={onCancel}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">

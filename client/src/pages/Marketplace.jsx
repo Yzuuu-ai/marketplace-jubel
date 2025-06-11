@@ -1,4 +1,4 @@
-// src/pages/Marketplace.jsx - Simplified Version
+// src/pages/Marketplace.jsx - Database Connected Version
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
@@ -8,14 +8,8 @@ import SuccessModal from '../components/SuccessModal';
 import AccountDetailModal from '../components/AccountDetailModal';
 import { useAuth } from '../context/AuthContext';
 import { useAdmin } from '../context/AdminContext';
+import { gamesAPI, gameAccountsAPI } from '../services/api';
 
-// Data game untuk filter
-const gameList = [
-  { id: 1, name: 'Mobile Legends', code: 'ML', category: 'MOBA' },
-  { id: 2, name: 'PUBG Mobile', code: 'PUBG', category: 'Battle Royale' },
-  { id: 3, name: 'Free Fire', code: 'FF', category: 'Battle Royale' },
-  { id: 4, name: 'Genshin Impact', code: 'GI', category: 'RPG' },
-];
 
 // Opsi sorting
 const SORT_OPTIONS = {
@@ -52,6 +46,8 @@ const Marketplace = () => {
   const [allAccounts, setAllAccounts] = useState([]);
   const [filteredAccounts, setFilteredAccounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [gameList, setGameList] = useState([]);
+  const [error, setError] = useState(null);
   
   // State untuk modal
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -65,37 +61,68 @@ const Marketplace = () => {
   const { isAuthenticated, walletAddress } = useAuth();
   const { createEscrowTransaction } = useAdmin();
 
-  // Get game account data
-  const getGameAccounts = useCallback(() => {
+  // Load games from database
+  const loadGames = useCallback(async () => {
     try {
-      const savedAccounts = localStorage.getItem('gameAccounts');
-      const accounts = savedAccounts ? JSON.parse(savedAccounts) : [];
-      const userProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
-      
-      return accounts.map(account => {
-        const sellerProfile = userProfiles[account.sellerWallet];
-        return {
-          ...account,
-          sellerName: sellerProfile?.nama || account.sellerName || `Seller-${account.sellerWallet.substring(0, 6)}`,
-          createdAt: account.createdAt || new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString()
-        };
-      });
+      const response = await gamesAPI.getAll();
+      if (response.success) {
+        setGameList(response.games);
+      }
     } catch (error) {
-      console.error('Error parsing game accounts:', error);
-      return [];
+      console.error('Error loading games:', error);
+      setError('Failed to load games');
     }
   }, []);
 
-  // Load accounts
+  // Load game accounts from database
+  const loadGameAccounts = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      const response = await gameAccountsAPI.getAll({ isAvailable: true });
+      
+      if (response.success) {
+        // Transform database data to match component expectations
+        const transformedAccounts = response.accounts.map(account => ({
+          id: account.id,
+          gameId: account.game_id,
+          title: account.title,
+          level: account.level,
+          rank: account.rank,
+          price: account.price, // Already formatted as "X ETH"
+          description: account.description,
+          images: account.images || [],
+          image: account.images && account.images.length > 0 ? account.images[0] : null,
+          sellerWallet: account.seller_wallet,
+          sellerName: account.seller_name || `Seller-${account.seller_wallet.substring(0, 6)}`,
+          contactType: account.contact_type,
+          contactValue: account.contact_value,
+          createdAt: account.created_at,
+          isSold: account.is_sold,
+          isInEscrow: account.is_in_escrow,
+          gameName: account.game_name
+        }));
+        
+        setAllAccounts(transformedAccounts);
+      } else {
+        setError('Failed to load accounts');
+        setAllAccounts([]);
+      }
+    } catch (error) {
+      console.error('Error loading game accounts:', error);
+      setError('Failed to load accounts: ' + error.message);
+      setAllAccounts([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Load data on component mount
   useEffect(() => {
-    setIsLoading(true);
-    const accounts = getGameAccounts();
-    const availableAccounts = accounts.filter(account => 
-      !account.isSold && !account.isInEscrow
-    );
-    setAllAccounts(availableAccounts);
-    setIsLoading(false);
-  }, [getGameAccounts]);
+    loadGames();
+    loadGameAccounts();
+  }, [loadGames, loadGameAccounts]);
 
   // Filter function
   const applyFilters = useCallback(() => {
@@ -374,9 +401,31 @@ const Marketplace = () => {
 
           {/* Loading State */}
           {isLoading ? (
-            <div className="flex justify-center items-center py-20">
-              <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent"></div>
-            </div>
+          <div className="flex justify-center items-center py-20">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent"></div>
+          <p className="ml-4 text-gray-600">Memuat akun game...</p>
+          </div>
+          ) : error ? (
+          <div className="text-center py-20">
+          <div className="bg-red-50 border border-red-200 rounded-xl shadow-lg p-12 max-w-md mx-auto">
+          <div className="text-6xl mb-4">⚠️</div>
+          <h3 className="text-xl font-bold text-red-800 mb-2">
+          Terjadi Kesalahan
+          </h3>
+          <p className="text-red-600 mb-6">
+          {error}
+          </p>
+          <button
+          onClick={() => {
+          setError(null);
+          loadGameAccounts();
+          }}
+          className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 transition"
+          >
+          Coba Lagi
+          </button>
+          </div>
+          </div>
           ) : filteredAccounts.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {filteredAccounts.map((account) => (
@@ -459,15 +508,22 @@ const Marketplace = () => {
 
 // Simplified Account Card Component
 const AccountCard = ({ account, gameList, onBuy, onViewDetail, formatPriceDisplay, isAuthenticated }) => {
-  const game = gameList.find(g => g.id === account.gameId);
+  const game = gameList.find(g => g.id === account.gameId) || { name: account.gameName || 'Unknown Game' };
   const priceDisplay = formatPriceDisplay(account.price);
+
+  // Handle image display
+  const getImageSrc = () => {
+    if (account.image) return account.image;
+    if (account.images && account.images.length > 0) return account.images[0];
+    return 'https://via.placeholder.com/300x200?text=No+Image';
+  };
 
   return (
     <div className="bg-white rounded-lg shadow hover:shadow-lg transition-all">
       {/* Image */}
       <div className="relative h-48 overflow-hidden rounded-t-lg">
         <img
-          src={account.image || 'https://via.placeholder.com/300x200?text=No+Image'}
+          src={getImageSrc()}
           alt={account.title}
           className="w-full h-full object-cover"
           onError={(e) => {
@@ -482,13 +538,18 @@ const AccountCard = ({ account, gameList, onBuy, onViewDetail, formatPriceDispla
               Lv. {account.level}
             </span>
           )}
+          {account.rank && (
+            <span className="bg-purple-600 text-white text-xs px-2 py-1 rounded">
+              {account.rank}
+            </span>
+          )}
         </div>
       </div>
 
       {/* Content */}
       <div className="p-4">
         <h3 className="font-semibold text-gray-800 mb-1">{account.title}</h3>
-        <p className="text-sm text-gray-600 mb-2">{game?.name || 'Unknown Game'}</p>
+        <p className="text-sm text-gray-600 mb-2">{game.name}</p>
         
         {/* Price */}
         <div className="mb-3">

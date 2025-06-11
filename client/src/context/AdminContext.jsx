@@ -1,5 +1,6 @@
-// src/context/AdminContext.jsx - Updated dengan admin wallet dan payment hash
+// src/context/AdminContext.jsx - Database Connected Version
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { escrowAPI } from '../services/api';
 
 const AdminContext = createContext();
 
@@ -48,86 +49,77 @@ export const ESCROW_WALLET = '0xe14fcb0fdb1256445dc6ddd876225a8fad9d211f';
 const AdminProvider = ({ children }) => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [escrowTransactions, setEscrowTransactions] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [currentWalletAddress, setCurrentWalletAddress] = useState(null);
 
-  const checkAutoRelease = useCallback(() => {
-    const now = Date.now();
-    const transactions = JSON.parse(localStorage.getItem('escrowTransactions') || '[]');
-    let hasUpdates = false;
-
-    const updatedTransactions = transactions.map(tx => {
-      if (tx.status === ESCROW_STATUS.BUYER_CONFIRMED) {
-        const confirmedTime = tx.timeline.find(t => t.status === ESCROW_STATUS.BUYER_CONFIRMED)?.timestamp;
-        if (confirmedTime && (now - confirmedTime) > 24 * 60 * 60 * 1000) { // 24 hours
-          hasUpdates = true;
-          return {
-            ...tx,
-            status: ESCROW_STATUS.COMPLETED,
-            releasedAt: now,
-            timeline: [
-              ...tx.timeline,
-              {
-                status: ESCROW_STATUS.COMPLETED,
-                timestamp: now,
-                note: 'Auto-released after 24 hours'
-              }
-            ]
-          };
-        }
+  // Load escrow transactions from database
+  const loadEscrowTransactions = useCallback(async (walletAddress = null) => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      const filters = {};
+      if (walletAddress) {
+        filters.wallet_address = walletAddress;
       }
-      return tx;
-    });
-
-    if (hasUpdates) {
-      localStorage.setItem('escrowTransactions', JSON.stringify(updatedTransactions));
-      setEscrowTransactions(updatedTransactions);
-    }
-  }, []);
-
-  const checkExpiredPayments = useCallback(() => {
-    const now = Date.now();
-    const transactions = JSON.parse(localStorage.getItem('escrowTransactions') || '[]');
-    let hasUpdates = false;
-
-    const updatedTransactions = transactions.map(tx => {
-      if (tx.status === ESCROW_STATUS.PENDING_PAYMENT && (now - tx.createdAt) > 24 * 60 * 60 * 1000) {
-        hasUpdates = true;
-        return {
-          ...tx,
-          status: ESCROW_STATUS.CANCELLED,
-          timeline: [
-            ...tx.timeline,
-            {
-              status: ESCROW_STATUS.CANCELLED,
-              timestamp: now,
-              note: 'Cancelled due to payment timeout'
+      
+      const response = await escrowAPI.getTransactions(filters);
+      
+      if (response.success) {
+        // Transform database transactions to match component expectations
+        const transformedTransactions = (response.transactions || []).map(t => {
+          // Safe JSON parsing helper
+          const parseJsonSafely = (jsonData, defaultValue = null) => {
+            if (!jsonData) return defaultValue;
+            if (typeof jsonData === 'object') return jsonData; // Already parsed
+            try {
+              return JSON.parse(jsonData);
+            } catch (error) {
+              console.error('Error parsing JSON:', error.message, 'Data:', jsonData);
+              return defaultValue;
             }
-          ]
-        };
-      }
-      return tx;
-    });
+          };
 
-    if (hasUpdates) {
-      localStorage.setItem('escrowTransactions', JSON.stringify(updatedTransactions));
-      setEscrowTransactions(updatedTransactions);
+          // Transform database fields to frontend fields
+          return {
+            id: t.id || '',
+            accountTitle: t.account_title || 'Unknown Account',
+            gameName: t.game_name || 'Unknown Game',
+            priceETH: t.amount || 0,
+            amount: t.amount || 0, // Keep both for compatibility
+            sellerWallet: t.seller_wallet || '',
+            buyerWallet: t.buyer_wallet || '',
+            status: t.status || ESCROW_STATUS.PENDING_PAYMENT,
+            createdAt: t.created_at ? new Date(t.created_at).getTime() : Date.now(),
+            timeline: parseJsonSafely(t.timeline, []),
+            deliveryProof: parseJsonSafely(t.delivery_proof, null),
+            buyerConfirmation: parseJsonSafely(t.buyer_confirmation, null),
+            accountDetails: parseJsonSafely(t.account_details, null),
+            paymentHash: t.payment_hash || null,
+            disputeReason: t.dispute_reason || null,
+            disputeId: t.dispute_id || null,
+            adminPaymentHash: t.admin_payment_hash || null
+          };
+        });
+
+        console.log('🔄 Transformed transactions:', transformedTransactions);
+        setEscrowTransactions(transformedTransactions);
+      } else {
+        setError('Failed to load escrow transactions');
+      }
+    } catch (error) {
+      console.error('Error loading escrow transactions:', error);
+      setError('Failed to load escrow transactions: ' + error.message);
+    } finally {
+      setIsLoading(false);
     }
   }, []);
 
   // Load initial data
   useEffect(() => {
-    const savedTransactions = JSON.parse(localStorage.getItem('escrowTransactions') || '[]');
-    setEscrowTransactions(savedTransactions);
-  }, []);
-
-  // Auto-check for expired payments and auto-release
-  useEffect(() => {
-    const interval = setInterval(() => {
-      checkAutoRelease();
-      checkExpiredPayments();
-    }, 60000); // Check every minute
-
-    return () => clearInterval(interval);
-  }, [checkAutoRelease, checkExpiredPayments]);
+    loadEscrowTransactions();
+  }, [loadEscrowTransactions]);
 
   const checkAdminStatus = (walletAddress) => {
     console.log('🔍 Checking admin status for:', walletAddress);
@@ -137,275 +129,186 @@ const AdminProvider = ({ children }) => {
     console.log('✅ Is admin:', isAdminWallet);
     
     setIsAdmin(isAdminWallet);
+    setCurrentWalletAddress(walletAddress);
     return isAdminWallet;
   };
 
-  const createEscrowTransaction = (orderData) => {
-    const escrowId = `escrow_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    const escrowTransaction = {
-      id: escrowId,
-      accountTitle: orderData.title,
-      gameName: orderData.gameName,
-      priceETH: orderData.totalPriceETH,
-      priceIDR: orderData.priceIDR,
-      sellerWallet: orderData.sellerWallet,
-      buyerWallet: orderData.buyerWallet,
-      escrowWallet: ESCROW_WALLET,
-      status: ESCROW_STATUS.PENDING_PAYMENT,
-      createdAt: Date.now(),
-      paymentHash: orderData.paymentHash || null,
-      network: orderData.network || 'Unknown',
-      accountDetails: {
-        level: orderData.level,
-        rank: orderData.rank,
-        description: orderData.description,
-        image: orderData.image
-      },
-      timeline: [
-        {
-          status: ESCROW_STATUS.PENDING_PAYMENT,
-          timestamp: Date.now(),
-          note: 'Escrow transaction created, waiting for admin payment confirmation'
+  const createEscrowTransaction = async (orderData) => {
+    try {
+      console.log('🔄 Creating escrow transaction in database:', orderData);
+      
+      const escrowData = {
+        accountId: orderData.accountId,
+        accountTitle: orderData.title,
+        gameName: orderData.gameName,
+        sellerWallet: orderData.sellerWallet,
+        buyerWallet: orderData.buyerWallet,
+        amount: orderData.totalPriceETH,
+        currency: 'ETH',
+        amountIdr: parseFloat(orderData.priceIDR.replace(/[^0-9]/g, '')),
+        exchangeRate: 50000000, // ETH to IDR rate
+        paymentHash: orderData.paymentHash || null,
+        network: orderData.network || 'Ethereum',
+        accountDetails: {
+          level: orderData.level,
+          rank: orderData.rank,
+          description: orderData.description,
+          image: orderData.image
         }
-      ]
-    };
+      };
 
-    // If payment hash exists, automatically confirm payment
-    if (orderData.paymentHash) {
-      escrowTransaction.status = ESCROW_STATUS.PAYMENT_RECEIVED;
-      escrowTransaction.paymentHash = orderData.paymentHash;
-      escrowTransaction.timeline.push({
-        status: ESCROW_STATUS.PAYMENT_RECEIVED,
-        timestamp: Date.now() + 1000,
-        note: `Payment received to escrow wallet. Hash: ${orderData.paymentHash}`
-      });
+      const response = await escrowAPI.create(escrowData);
+      
+      if (response.success) {
+        console.log('✅ Escrow transaction created in database:', response.escrow_id);
+        
+        // Reload transactions to get updated list
+        await loadEscrowTransactions();
+        
+        return {
+          id: response.escrow_id,
+          ...response.escrow
+        };
+      } else {
+        throw new Error(response.message || 'Failed to create escrow transaction');
+      }
+    } catch (error) {
+      console.error('❌ Error creating escrow transaction:', error);
+      throw error;
     }
-
-    const existingTransactions = JSON.parse(localStorage.getItem('escrowTransactions') || '[]');
-    const updatedTransactions = [...existingTransactions, escrowTransaction];
-    localStorage.setItem('escrowTransactions', JSON.stringify(updatedTransactions));
-    setEscrowTransactions(updatedTransactions);
-
-    // Mark account as in escrow
-    const accounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
-    const updatedAccounts = accounts.map(acc => 
-      acc.id === orderData.accountId 
-        ? { ...acc, isInEscrow: true, escrowId: escrowId }
-        : acc
-    );
-    localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
-
-    console.log('✅ Escrow transaction created:', escrowId);
-    return escrowTransaction;
   };
 
-  const confirmPaymentReceived = (escrowId, paymentHash) => {
-    const transactions = JSON.parse(localStorage.getItem('escrowTransactions') || '[]');
-    const updatedTransactions = transactions.map(tx => {
-      if (tx.id === escrowId) {
-        return {
-          ...tx,
-          status: ESCROW_STATUS.PAYMENT_RECEIVED,
-          paymentHash,
-          timeline: [
-            ...tx.timeline,
-            {
-              status: ESCROW_STATUS.PAYMENT_RECEIVED,
-              timestamp: Date.now(),
-              note: 'Payment confirmed by admin'
-            }
-          ]
-        };
+  const confirmPaymentReceived = async (escrowId, paymentHash, adminWallet) => {
+    try {
+      console.log('🔄 Confirming payment in database:', escrowId);
+      
+      const response = await escrowAPI.confirmPayment(escrowId, {
+        payment_hash: paymentHash,
+        admin_wallet: adminWallet
+      });
+      
+      if (response.success) {
+        console.log('✅ Payment confirmed in database:', escrowId);
+        await loadEscrowTransactions();
+      } else {
+        throw new Error(response.message || 'Failed to confirm payment');
       }
-      return tx;
-    });
-
-    localStorage.setItem('escrowTransactions', JSON.stringify(updatedTransactions));
-    setEscrowTransactions(updatedTransactions);
-    console.log('✅ Payment confirmed for escrow:', escrowId);
+    } catch (error) {
+      console.error('❌ Error confirming payment:', error);
+      throw error;
+    }
   };
 
-  const deliverAccount = (escrowId, deliveryData) => {
-    const transactions = JSON.parse(localStorage.getItem('escrowTransactions') || '[]');
-    const updatedTransactions = transactions.map(tx => {
-      if (tx.id === escrowId) {
-        return {
-          ...tx,
-          status: ESCROW_STATUS.ACCOUNT_DELIVERED,
-          deliveryProof: {
-            ...deliveryData,
-            deliveredAt: Date.now()
-          },
-          timeline: [
-            ...tx.timeline,
-            {
-              status: ESCROW_STATUS.ACCOUNT_DELIVERED,
-              timestamp: Date.now(),
-              note: 'Account details delivered to buyer'
-            }
-          ]
-        };
+  const deliverAccount = async (escrowId, deliveryData) => {
+    try {
+      console.log('🔄 Delivering account in database:', escrowId);
+      console.log('📦 Delivery data:', deliveryData);
+      console.log('🌐 API URL will be:', `${process.env.REACT_APP_API_URL || 'http://localhost:5000/api'}/escrow/${escrowId}/deliver`);
+      
+      const response = await escrowAPI.deliverAccount(escrowId, {
+        delivery_data: deliveryData
+      });
+      
+      if (response.success) {
+        console.log('✅ Account delivered in database:', escrowId);
+        await loadEscrowTransactions();
+      } else {
+        throw new Error(response.message || 'Failed to deliver account');
       }
-      return tx;
-    });
-
-    localStorage.setItem('escrowTransactions', JSON.stringify(updatedTransactions));
-    setEscrowTransactions(updatedTransactions);
-    console.log('✅ Account delivered for escrow:', escrowId);
+    } catch (error) {
+      console.error('❌ Error delivering account:', error);
+      console.error('❌ Error details:', {
+        escrowId,
+        deliveryData,
+        error: error.message
+      });
+      throw error;
+    }
   };
 
-  const confirmReceipt = (escrowId, confirmationData) => {
-    const transactions = JSON.parse(localStorage.getItem('escrowTransactions') || '[]');
-    const updatedTransactions = transactions.map(tx => {
-      if (tx.id === escrowId) {
-        return {
-          ...tx,
-          status: ESCROW_STATUS.BUYER_CONFIRMED,
-          buyerConfirmation: {
-            ...confirmationData,
-            confirmedAt: Date.now()
-          },
-          timeline: [
-            ...tx.timeline,
-            {
-              status: ESCROW_STATUS.BUYER_CONFIRMED,
-              timestamp: Date.now(),
-              note: confirmationData.satisfied 
-                ? 'Buyer confirmed receipt - satisfied'
-                : 'Buyer confirmed receipt with notes'
-            }
-          ]
-        };
+  const confirmReceipt = async (escrowId, confirmationData) => {
+    try {
+      console.log('🔄 Confirming receipt in database:', escrowId);
+      
+      const response = await escrowAPI.confirmReceipt(escrowId, {
+        confirmation_data: confirmationData
+      });
+      
+      if (response.success) {
+        console.log('✅ Receipt confirmed in database:', escrowId);
+        await loadEscrowTransactions();
+      } else {
+        throw new Error(response.message || 'Failed to confirm receipt');
       }
-      return tx;
-    });
-
-    localStorage.setItem('escrowTransactions', JSON.stringify(updatedTransactions));
-    setEscrowTransactions(updatedTransactions);
-    console.log('✅ Receipt confirmed for escrow:', escrowId);
+    } catch (error) {
+      console.error('❌ Error confirming receipt:', error);
+      throw error;
+    }
   };
 
-  const createDispute = (escrowId, reason, disputeBy) => {
-    const transactions = JSON.parse(localStorage.getItem('escrowTransactions') || '[]');
-    const updatedTransactions = transactions.map(tx => {
-      if (tx.id === escrowId) {
-        return {
-          ...tx,
-          status: ESCROW_STATUS.DISPUTED,
-          disputeReason: reason,
-          disputeBy,
-          disputeId: `dispute_${Date.now()}`,
-          timeline: [
-            ...tx.timeline,
-            {
-              status: ESCROW_STATUS.DISPUTED,
-              timestamp: Date.now(),
-              note: `Dispute created by ${disputeBy}: ${reason}`
-            }
-          ]
-        };
+  const createDispute = async (escrowId, reason, disputeBy) => {
+    try {
+      console.log('🔄 Creating dispute in database:', escrowId);
+      
+      const response = await escrowAPI.createDispute(escrowId, {
+        reason: reason,
+        dispute_by: disputeBy
+      });
+      
+      if (response.success) {
+        console.log('⚠️ Dispute created in database:', escrowId);
+        await loadEscrowTransactions();
+      } else {
+        throw new Error(response.message || 'Failed to create dispute');
       }
-      return tx;
-    });
-
-    localStorage.setItem('escrowTransactions', JSON.stringify(updatedTransactions));
-    setEscrowTransactions(updatedTransactions);
-    console.log('⚠️ Dispute created for escrow:', escrowId);
+    } catch (error) {
+      console.error('❌ Error creating dispute:', error);
+      throw error;
+    }
   };
 
-  const releaseFunds = (escrowId, adminPaymentHash) => {
-    const transactions = JSON.parse(localStorage.getItem('escrowTransactions') || '[]');
-    const updatedTransactions = transactions.map(tx => {
-      if (tx.id === escrowId) {
-        const completedTx = {
-          ...tx,
-          status: ESCROW_STATUS.COMPLETED,
-          releasedAt: Date.now(),
-          adminPaymentHash: adminPaymentHash, // Track admin's payment to seller
-          timeline: [
-            ...tx.timeline,
-            {
-              status: ESCROW_STATUS.COMPLETED,
-              timestamp: Date.now(),
-              note: `Funds released to seller by admin. Payment hash: ${adminPaymentHash}`
-            }
-          ]
-        };
-
-        // Mark the sold account
-        const accounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
-        const updatedAccounts = accounts.map(acc => 
-          acc.escrowId === escrowId 
-            ? { 
-                ...acc, 
-                isSold: true, 
-                isInEscrow: false,
-                soldAt: Date.now(),
-                buyerWallet: tx.buyerWallet,
-                buyerName: `Buyer-${tx.buyerWallet.substring(0, 6)}`
-              }
-            : acc
-        );
-        localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
-
-        return completedTx;
+  const releaseFunds = async (escrowId, adminPaymentHash) => {
+    try {
+      console.log('🔄 Releasing funds in database:', escrowId);
+      
+      const response = await escrowAPI.releaseFunds(escrowId, {
+        admin_payment_hash: adminPaymentHash,
+        admin_wallet: currentWalletAddress
+      });
+      
+      if (response.success) {
+        console.log('✅ Funds released in database:', escrowId);
+        await loadEscrowTransactions();
+      } else {
+        throw new Error(response.message || 'Failed to release funds');
       }
-      return tx;
-    });
-
-    localStorage.setItem('escrowTransactions', JSON.stringify(updatedTransactions));
-    setEscrowTransactions(updatedTransactions);
-    console.log('💰 Funds released for escrow:', escrowId);
+    } catch (error) {
+      console.error('❌ Error releasing funds:', error);
+      throw error;
+    }
   };
 
-  const resolveDispute = (disputeId, resolution, refund = false, adminPaymentHash = null) => {
-    const transactions = JSON.parse(localStorage.getItem('escrowTransactions') || '[]');
-    const updatedTransactions = transactions.map(tx => {
-      if (tx.disputeId === disputeId || tx.id === disputeId) {
-        const newStatus = refund ? ESCROW_STATUS.REFUNDED : ESCROW_STATUS.COMPLETED;
-        const resolvedTx = {
-          ...tx,
-          status: newStatus,
-          disputeResolution: resolution,
-          resolvedAt: Date.now(),
-          adminPaymentHash: adminPaymentHash, // Track admin's payment
-          timeline: [
-            ...tx.timeline,
-            {
-              status: newStatus,
-              timestamp: Date.now(),
-              note: `Dispute resolved: ${resolution}${adminPaymentHash ? `. Payment hash: ${adminPaymentHash}` : ''}`
-            }
-          ]
-        };
-
-        // Update account status
-        const accounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
-        const updatedAccounts = accounts.map(acc => 
-          acc.escrowId === tx.id 
-            ? { 
-                ...acc, 
-                isSold: !refund,
-                isInEscrow: false,
-                ...(refund ? {} : {
-                  soldAt: Date.now(),
-                  buyerWallet: tx.buyerWallet,
-                  buyerName: `Buyer-${tx.buyerWallet.substring(0, 6)}`
-                })
-              }
-            : acc
-        );
-        localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
-
-        return resolvedTx;
+  const resolveDispute = async (disputeId, resolution, refund = false, adminPaymentHash = null) => {
+    try {
+      console.log('🔄 Resolving dispute in database:', disputeId);
+      
+      const response = await escrowAPI.resolveDispute(disputeId, {
+        resolution: resolution,
+        refund: refund,
+        admin_payment_hash: adminPaymentHash,
+        admin_wallet: currentWalletAddress
+      });
+      
+      if (response.success) {
+        console.log('⚖️ Dispute resolved in database:', disputeId);
+        await loadEscrowTransactions();
+      } else {
+        throw new Error(response.message || 'Failed to resolve dispute');
       }
-      return tx;
-    });
-
-    localStorage.setItem('escrowTransactions', JSON.stringify(updatedTransactions));
-    setEscrowTransactions(updatedTransactions);
-    console.log('⚖️ Dispute resolved:', disputeId);
+    } catch (error) {
+      console.error('❌ Error resolving dispute:', error);
+      throw error;
+    }
   };
 
   const getAdminStats = () => {
@@ -417,10 +320,10 @@ const AdminProvider = ({ children }) => {
     const disputedTransactions = escrowTransactions.filter(t => t.status === ESCROW_STATUS.DISPUTED).length;
     const completedTransactions = escrowTransactions.filter(t => t.status === ESCROW_STATUS.COMPLETED).length;
     
-    const totalVolume = escrowTransactions.reduce((sum, tx) => sum + parseFloat(tx.priceETH || 0), 0);
+    const totalVolume = escrowTransactions.reduce((sum, tx) => sum + parseFloat(tx.priceETH || tx.amount || 0), 0);
     const totalInEscrow = escrowTransactions
       .filter(t => [ESCROW_STATUS.PAYMENT_RECEIVED, ESCROW_STATUS.ACCOUNT_DELIVERED, ESCROW_STATUS.BUYER_CONFIRMED].includes(t.status))
-      .reduce((sum, tx) => sum + parseFloat(tx.priceETH || 0), 0);
+      .reduce((sum, tx) => sum + parseFloat(tx.priceETH || tx.amount || 0), 0);
 
     return {
       totalTransactions,
@@ -436,10 +339,14 @@ const AdminProvider = ({ children }) => {
   const value = {
     isAdmin,
     escrowTransactions,
+    isLoading,
+    error,
     ESCROW_WALLET,
     checkAdminStatus,
     createEscrowTransaction,
     confirmPaymentReceived,
+    loadEscrowTransactions,
+    // TODO: Update these functions to use database API
     deliverAccount,
     confirmReceipt,
     createDispute,

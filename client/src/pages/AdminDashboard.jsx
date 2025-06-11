@@ -112,6 +112,23 @@ const EscrowTransactionCard = ({ transaction, onAction }) => {
         >
           Detail
         </button>
+        
+        {/* Debug button for testing */}
+        <button
+          onClick={() => {
+            console.log('🔍 Debug Transaction Data:', {
+              transaction,
+              buyerWallet: transaction.buyerWallet,
+              sellerWallet: transaction.sellerWallet,
+              priceETH: transaction.priceETH,
+              amount: transaction.amount,
+              status: transaction.status
+            });
+          }}
+          className="px-2 py-1 bg-yellow-500 text-white rounded text-xs"
+        >
+          Debug
+        </button>
       </div>
     </div>
   );
@@ -140,6 +157,14 @@ const AdminDashboard = () => {
     }
   }, [walletAddress, checkAdminStatus]);
 
+  // Debug logging for escrow transactions
+  useEffect(() => {
+    console.log('🔍 AdminDashboard escrowTransactions:', escrowTransactions);
+    if (escrowTransactions.length > 0) {
+      console.log('🔍 Sample transaction:', escrowTransactions[0]);
+    }
+  }, [escrowTransactions]);
+
   const handleAction = (action, transaction, params = {}) => {
     switch (action) {
       case 'releaseFunds':
@@ -161,21 +186,26 @@ const AdminDashboard = () => {
     }
   };
 
-  const handleAdminPayment = (paymentData) => {
+  const handleAdminPayment = async (paymentData) => {
     if (!selectedTransaction) return;
 
     const { transactionHash, action } = paymentData;
 
-    if (action === 'release') {
-      releaseFunds(selectedTransaction.id, transactionHash);
-    } else if (action === 'refund') {
-      resolveDispute(selectedTransaction.disputeId || selectedTransaction.id, 
-        'Refunded to buyer due to valid dispute', true, transactionHash);
-    }
+    try {
+      if (action === 'release') {
+        await releaseFunds(selectedTransaction.id, transactionHash);
+      } else if (action === 'refund') {
+        await resolveDispute(selectedTransaction.disputeId || selectedTransaction.id, 
+          'Refunded to buyer due to valid dispute', true, transactionHash);
+      }
 
-    setShowAdminPaymentModal(false);
-    setSelectedTransaction(null);
-    setAdminPaymentAction('');
+      setShowAdminPaymentModal(false);
+      setSelectedTransaction(null);
+      setAdminPaymentAction('');
+    } catch (error) {
+      console.error('Error processing admin payment:', error);
+      alert('Gagal memproses pembayaran admin: ' + error.message);
+    }
   };
 
   const stats = getAdminStats();
