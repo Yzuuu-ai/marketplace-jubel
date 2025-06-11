@@ -1,4 +1,3 @@
-// src/context/AuthContext.jsx - Updated to support email authentication and wallet disconnection
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 const AuthContext = createContext();
@@ -11,273 +10,282 @@ export const AuthProvider = ({ children }) => {
   const [profileData, setProfileData] = useState({ nama: '', email: '', nomor: '' });
   const [accountType, setAccountType] = useState(null); // 'wallet' or 'email'
   const [currentUser, setCurrentUser] = useState(null);
+  const [isInitialized, setIsInitialized] = useState(false);
 
-  // Function to handle disconnection of the wallet or email account
+  // Fungsi untuk inisialisasi data profil wallet
+  const initializeWalletProfile = useCallback((address) => {
+    const userProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
+    const profile = userProfiles[address];
+    
+    if (profile) {
+      setProfileData(profile);
+    } else {
+      const newProfile = {
+        nama: `User-${address.substring(0, 6)}`,
+        email: '',
+        nomor: ''
+      };
+      setProfileData(newProfile);
+      // Simpan profil baru ke localStorage
+      userProfiles[address] = newProfile;
+      localStorage.setItem('userProfiles', JSON.stringify(userProfiles));
+    }
+  }, []);
+
+  // Fungsi untuk menghubungkan wallet MetaMask
+  const connectWallet = async () => {
+    if (!window.ethereum) {
+      throw new Error('MetaMask tidak terdeteksi. Silakan install MetaMask terlebih dahulu.');
+    }
+
+    try {
+      setIsConnecting(true);
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      
+      if (accounts.length === 0) {
+        throw new Error('Tidak ada akun yang dipilih');
+      }
+
+      const newWalletAddress = accounts[0];
+      setWalletAddress(newWalletAddress);
+      setIsAuthenticated(true);
+      setConnectionMethod('manual');
+      setAccountType('wallet');
+      localStorage.removeItem('walletManuallyDisconnected');
+
+      // Inisialisasi profil wallet
+      initializeWalletProfile(newWalletAddress);
+
+      return newWalletAddress;
+    } catch (error) {
+      console.error('Error connecting wallet:', error);
+      throw new Error(`Gagal menghubungkan wallet: ${error.message}`);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  // Fungsi untuk menyimpan wallet address secara manual
+  const saveWalletAddress = (address) => {
+    if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      throw new Error('Alamat wallet tidak valid');
+    }
+
+    setWalletAddress(address);
+    setIsAuthenticated(true);
+    setConnectionMethod('manual');
+    setAccountType('wallet');
+    localStorage.removeItem('walletManuallyDisconnected');
+    initializeWalletProfile(address);
+  };
+
+  // Fungsi untuk memutuskan koneksi
   const handleDisconnection = useCallback(() => {
     setWalletAddress('');
     setIsAuthenticated(false);
     setConnectionMethod(null);
-    setIsConnecting(false);
     setProfileData({ nama: '', email: '', nomor: '' });
     setAccountType(null);
     setCurrentUser(null);
-    localStorage.removeItem('currentSession');
-    localStorage.removeItem('walletManuallyDisconnected');
   }, []);
 
-  // Function to handle wallet change (MetaMask)
-  const setupAccountChangeListener = useCallback(() => {
+  // Fungsi logout komplit
+  const logout = useCallback(() => {
+    if (accountType === 'email') {
+      localStorage.removeItem('currentSession');
+    } else {
+      localStorage.setItem('walletManuallyDisconnected', 'true');
+    }
+    handleDisconnection();
+  }, [accountType, handleDisconnection]);
+
+  // Fungsi untuk mendengarkan perubahan akun wallet
+  const setupEventListeners = useCallback(() => {
     if (!window.ethereum) return;
 
-    window.ethereum.on('accountsChanged', (accounts) => {
-      console.log('Account changed:', accounts);
-
+    const handleAccountsChanged = (accounts) => {
+      if (accountType !== 'wallet') return;
+      
       if (accounts.length === 0) {
-        // Only disconnect if it's a wallet account
-        if (accountType === 'wallet') {
-          handleDisconnection();
-        }
+        logout();
       } else {
-        const wasManuallyLoggedOut = localStorage.getItem('walletManuallyDisconnected') === 'true';
-        if (!wasManuallyLoggedOut && accountType === 'wallet') {
+        const wasManuallyDisconnected = localStorage.getItem('walletManuallyDisconnected') === 'true';
+        if (!wasManuallyDisconnected) {
           setWalletAddress(accounts[0]);
-          setIsAuthenticated(true);
-          setConnectionMethod('auto');
+          initializeWalletProfile(accounts[0]);
         }
       }
-    });
+    };
 
-    window.ethereum.on('chainChanged', (chainId) => {
-      console.log('Chain changed:', chainId);
+    const handleChainChanged = () => {
       if (accountType === 'wallet') {
         window.location.reload();
       }
-    });
+    };
 
-    window.ethereum.on('disconnect', (error) => {
-      console.log('MetaMask disconnected:', error);
-      if (accountType === 'wallet') {
-        handleDisconnection();
-      }
-    });
-  }, [handleDisconnection, accountType]);
+    window.ethereum.on('accountsChanged', handleAccountsChanged);
+    window.ethereum.on('chainChanged', handleChainChanged);
 
-  // Function to check for existing connection (wallet or email)
+    return () => {
+      window.ethereum?.removeListener('accountsChanged', handleAccountsChanged);
+      window.ethereum?.removeListener('chainChanged', handleChainChanged);
+    };
+  }, [accountType, logout, initializeWalletProfile]);
+
+  // Fungsi untuk memeriksa koneksi yang ada
   const checkExistingConnection = useCallback(async () => {
     try {
-      // Check for email session first
-      const session = localStorage.getItem('currentSession');
-      if (session) {
-        const sessionData = JSON.parse(session);
+      // Cek sesi email terlebih dahulu
+      const session = JSON.parse(localStorage.getItem('currentSession') || '{}');
+      if (session.userId) {
         const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
-        const user = registeredUsers.find(u => u.id === sessionData.userId);
+        const user = registeredUsers.find(u => u.id === session.userId);
         
         if (user) {
-          setWalletAddress(`email_${user.id}`);
-          setIsAuthenticated(true);
-          setConnectionMethod('email');
-          setAccountType('email');
           setCurrentUser(user);
           setProfileData({
             nama: user.nama,
             email: user.email,
             nomor: user.nomor || ''
           });
+          setIsAuthenticated(true);
+          setConnectionMethod('email');
+          setAccountType('email');
           return;
         }
       }
 
-      // Check for MetaMask connection
+      // Cek koneksi wallet
       if (!window.ethereum) return;
 
       const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-      const wasManuallyLoggedOut = localStorage.getItem('walletManuallyDisconnected') === 'true';
+      const wasManuallyDisconnected = localStorage.getItem('walletManuallyDisconnected') === 'true';
 
-      if (accounts.length > 0 && !wasManuallyLoggedOut) {
+      if (accounts.length > 0 && !wasManuallyDisconnected) {
         setWalletAddress(accounts[0]);
         setIsAuthenticated(true);
         setConnectionMethod('auto');
         setAccountType('wallet');
-        localStorage.removeItem('walletManuallyDisconnected');
-        
-        // Load profile data from localStorage if exists
-        const userProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
-        const profile = userProfiles[accounts[0]];
-        if (profile) {
-          setProfileData(profile);
-        }
+        initializeWalletProfile(accounts[0]);
       }
     } catch (error) {
       console.error('Error checking existing connection:', error);
+    } finally {
+      setIsInitialized(true);
     }
-  }, []);
+  }, [initializeWalletProfile]);
 
+  // Inisialisasi saat mount
   useEffect(() => {
     checkExistingConnection();
-    setupAccountChangeListener();
-  }, [checkExistingConnection, setupAccountChangeListener]);
+    const cleanup = setupEventListeners();
+    return cleanup;
+  }, [checkExistingConnection, setupEventListeners]);
 
-  // Function for login (either email or wallet)
-  const login = async (identifier) => {
-    setIsConnecting(true);
+  // Fungsi untuk update data profil
+  const updateProfileData = useCallback((newProfileData) => {
+    setProfileData(newProfileData);
+    
+    if (accountType === 'email' && currentUser) {
+      // Update untuk user email
+      const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
+      const updatedUsers = registeredUsers.map(u => 
+        u.id === currentUser.id ? { ...u, ...newProfileData } : u
+      );
+      localStorage.setItem('registeredUsers', JSON.stringify(updatedUsers));
+      setCurrentUser(prev => ({ ...prev, ...newProfileData }));
+    } else if (accountType === 'wallet' && walletAddress) {
+      // Update untuk user wallet
+      const userProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
+      userProfiles[walletAddress] = newProfileData;
+      localStorage.setItem('userProfiles', JSON.stringify(userProfiles));
+    }
+  }, [accountType, currentUser, walletAddress]);
 
+  // Fungsi untuk mengecek apakah wallet di-disconnect secara manual
+  const wasManuallyDisconnected = useCallback(() => {
+    return localStorage.getItem('walletManuallyDisconnected') === 'true';
+  }, []);
+
+  // Fungsi untuk force disconnect dan clear semua data
+  const forceDisconnect = useCallback(() => {
+    // Clear all localStorage data
+    localStorage.removeItem('currentSession');
+    localStorage.removeItem('registeredUsers');
+    localStorage.removeItem('userProfiles');
+    localStorage.removeItem('walletManuallyDisconnected');
+    localStorage.removeItem('gameAccounts');
+    
+    // Reset all states
+    handleDisconnection();
+    
+    // Reload page to ensure clean state
+    window.location.reload();
+  }, [handleDisconnection]);
+
+  // Fungsi login untuk email dan wallet
+  const login = useCallback(async (identifier) => {
     try {
-      // Check if it's an email login (starts with 'email_')
-      if (identifier && identifier.startsWith('email_')) {
-        // Email login
-        const session = localStorage.getItem('currentSession');
-        if (session) {
-          const sessionData = JSON.parse(session);
+      // Check if it's email login (starts with 'email_')
+      if (identifier.startsWith('email_')) {
+        const userId = identifier.replace('email_', '');
+        const session = JSON.parse(localStorage.getItem('currentSession') || '{}');
+        
+        if (session.userId === parseInt(userId)) {
           const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
-          const user = registeredUsers.find(u => u.id === sessionData.userId);
+          const user = registeredUsers.find(u => u.id === parseInt(userId));
           
           if (user) {
-            setWalletAddress(identifier);
-            setIsAuthenticated(true);
-            setConnectionMethod('email');
-            setAccountType('email');
             setCurrentUser(user);
             setProfileData({
               nama: user.nama,
               email: user.email,
               nomor: user.nomor || ''
             });
-            
-            return { success: true, address: identifier };
+            setIsAuthenticated(true);
+            setConnectionMethod('email');
+            setAccountType('email');
+            return true;
           }
         }
-        throw new Error('Invalid email session');
-      }
-
-      // MetaMask login
-      if (!window.ethereum) {
-        throw new Error('MetaMask tidak ditemukan. Silakan install MetaMask terlebih dahulu.');
-      }
-
-      const accounts = await window.ethereum.request({
-        method: 'eth_requestAccounts',
-      });
-
-      if (accounts.length > 0) {
-        setWalletAddress(accounts[0]);
+        throw new Error('Session tidak valid');
+      } else {
+        // Wallet login
+        if (!/^0x[a-fA-F0-9]{40}$/.test(identifier)) {
+          throw new Error('Alamat wallet tidak valid');
+        }
+        
+        setWalletAddress(identifier);
         setIsAuthenticated(true);
         setConnectionMethod('manual');
         setAccountType('wallet');
         localStorage.removeItem('walletManuallyDisconnected');
-        
-        // Load profile data from localStorage if exists
-        const userProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
-        const profile = userProfiles[accounts[0]];
-        if (profile) {
-          setProfileData(profile);
-        } else {
-          // Set default profile name for wallet users
-          setProfileData({
-            nama: `User-${accounts[0].substring(0, 6)}`,
-            email: '',
-            nomor: ''
-          });
-        }
-        
-        return { success: true, address: accounts[0] };
-      } else {
-        throw new Error('Tidak ada akun yang dipilih');
+        initializeWalletProfile(identifier);
+        return true;
       }
     } catch (error) {
       console.error('Login error:', error);
-      return {
-        success: false,
-        error: error.code === 4001 ? 'Koneksi ditolak oleh user' : error.message,
-      };
-    } finally {
-      setIsConnecting(false);
+      throw error;
     }
-  };
-
-  // Logout function
-  const logout = async () => {
-    try {
-      if (accountType === 'email') {
-        // Email logout
-        localStorage.removeItem('currentSession');
-      } else {
-        // Wallet logout
-        localStorage.setItem('walletManuallyDisconnected', 'true');
-        
-        if (window.ethereum && window.ethereum.disconnect) {
-          await window.ethereum.disconnect();
-        }
-      }
-
-      handleDisconnection();
-      return { success: true };
-    } catch (error) {
-      console.error('Logout error:', error);
-      handleDisconnection();
-      return { success: true };
-    }
-  };
-
-  // Force disconnect function
-  const forceDisconnect = () => {
-    localStorage.setItem('walletManuallyDisconnected', 'true');
-    localStorage.removeItem('currentSession');
-    localStorage.removeItem('gameAccounts');
-    localStorage.removeItem('escrowTransactions');
-    handleDisconnection();
-
-    setTimeout(() => {
-      window.location.reload();
-    }, 100);
-  };
-
-  // Reconnect function
-  const reconnect = async () => {
-    localStorage.removeItem('walletManuallyDisconnected');
-    return await login();
-  };
-
-  // Function to check if the wallet was manually disconnected
-  const wasManuallyDisconnected = () => {
-    return localStorage.getItem('walletManuallyDisconnected') === 'true';
-  };
-
-  // Function to update profile data
-  const updateProfileData = (newProfileData) => {
-    setProfileData(newProfileData);
-    
-    if (accountType === 'email' && currentUser) {
-      // Update email user profile
-      const registeredUsers = JSON.parse(localStorage.getItem('registeredUsers') || '[]');
-      const updatedUsers = registeredUsers.map(u => 
-        u.id === currentUser.id 
-          ? { ...u, nama: newProfileData.nama, nomor: newProfileData.nomor }
-          : u
-      );
-      localStorage.setItem('registeredUsers', JSON.stringify(updatedUsers));
-      setCurrentUser({ ...currentUser, nama: newProfileData.nama, nomor: newProfileData.nomor });
-    } else if (accountType === 'wallet') {
-      // Update wallet user profile
-      const userProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
-      userProfiles[walletAddress] = newProfileData;
-      localStorage.setItem('userProfiles', JSON.stringify(userProfiles));
-    }
-  };
+  }, [initializeWalletProfile]);
 
   const value = {
     walletAddress,
     isAuthenticated,
     isConnecting,
+    isInitialized,
     connectionMethod,
     profileData,
     accountType,
     currentUser,
+    connectWallet,
+    saveWalletAddress,
     login,
     logout,
-    forceDisconnect,
-    reconnect,
-    wasManuallyDisconnected,
     updateProfileData,
+    initializeWalletProfile,
+    wasManuallyDisconnected,
+    forceDisconnect
   };
 
   return (

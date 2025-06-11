@@ -528,6 +528,11 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Middleware profil
+app.get('/api/profil', (res, res) => {
+  
+});
+
 // Start server
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);

@@ -93,7 +93,6 @@ const Profile = () => {
     }
     setIsEditing(!isEditing);
   };
-  
 
   const handleSave = () => {
     if (!editData.nama.trim()) {
@@ -150,7 +149,7 @@ const Profile = () => {
   const handleConnectWalletClick = async () => {
     setIsConnectingWallet(true);
     try {
-      await connectWallet();
+      await connectWallet(); // Menghubungkan MetaMask
       setShowWalletForm(false);
     } catch (error) {
       console.error('Error connecting wallet:', error);
@@ -160,27 +159,25 @@ const Profile = () => {
     }
   };
 
-  
-
   const handleManualWalletConnect = () => {
     if (!newWalletAddress) {
       alert('Alamat wallet tidak boleh kosong');
       return;
     }
-    
+
     if (!/^0x[a-fA-F0-9]{40}$/.test(newWalletAddress)) {
       alert('Alamat wallet tidak valid');
       return;
     }
-    
-    saveWalletAddress(newWalletAddress);
+
+    saveWalletAddress(newWalletAddress); // Simpan alamat wallet
     setShowWalletForm(false);
     setNewWalletAddress('');
   };
 
   const handleDisconnectWallet = () => {
     if (window.confirm('Apakah Anda yakin ingin melepas wallet ini?')) {
-      logout(); // Calls the logout function to disconnect the wallet
+      logout(); // Memanggil fungsi logout untuk melepaskan wallet
     }
   };
 
@@ -238,6 +235,7 @@ const Profile = () => {
                     <span className="text-green-600">Aktif</span>
                   </div>
                   
+
                   {/* Account Type Badge */}
                   <div className="mt-4">
                     <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${accountType === 'email' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
@@ -531,7 +529,7 @@ const Profile = () => {
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-lg font-semibold text-gray-900">Aktivitas Terbaru</h2>
                   <a href="/riwayat-transaksi" className="text-blue-600 hover:text-blue-700 text-sm">
-                    Lihat Semua →
+                    Lihat Semua → 
                   </a>
                 </div>
 
@@ -564,7 +562,7 @@ const Profile = () => {
                         Wallet ini akan digunakan untuk transaksi cryptocurrency.
                       </p>
                       <button className="mt-2 text-sm font-medium text-yellow-800 hover:text-yellow-900">
-                        Pelajari cara menghubungkan wallet →
+                        Pelajari cara menghubungkan wallet → 
                       </button>
                     </div>
                   </div>
@@ -579,5 +577,3 @@ const Profile = () => {
 };
 
 export default Profile;
-
-
