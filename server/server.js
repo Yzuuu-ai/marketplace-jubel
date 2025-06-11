@@ -351,6 +351,98 @@ app.get('/api/debug/table-structure', (req, res) => {
   });
 });
 
+// Middleware
+app.use(bodyParser.json());
+
+// API: Mendapatkan semua akun game
+app.get('/api/game-accounts', (req, res) => {
+  const { sellerWallet, isAvailable } = req.query;
+  
+  // Query untuk mengambil akun berdasarkan status dan dompet seller
+  const query = `
+    SELECT * FROM game_accounts
+    WHERE seller_wallet = ? AND (is_sold = ? OR is_in_escrow = ?)
+  `;
+  
+  db.query(query, [sellerWallet, isAvailable === 'true' ? 0 : 1, isAvailable === 'escrow' ? 1 : 0], (err, results) => {
+    if (err) {
+      console.error('Error fetching game accounts:', err);
+      return res.status(500).json({ success: false, message: 'Error fetching data' });
+    }
+    res.json({ success: true, accounts: results });
+  });
+});
+
+// API: Membuat akun game baru
+app.post('/api/game-accounts', (req, res) => {
+  const {
+    gameId, title, level, rank, price, description, images,
+    contactType, contactValue, sellerWallet, sellerId
+  } = req.body;
+
+  const query = `
+    INSERT INTO game_accounts (game_id, title, level, rank, price, description, images,
+      contact_type, contact_value, seller_wallet, seller_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `;
+  
+  db.query(query, [gameId, title, level, rank, price, description, JSON.stringify(images),
+    contactType, contactValue, sellerWallet, sellerId], (err, results) => {
+    if (err) {
+      console.error('Error inserting game account:', err);
+      return res.status(500).json({ success: false, message: 'Error inserting data' });
+    }
+    res.json({ success: true, message: 'Akun game berhasil dibuat!' });
+  });
+});
+
+// API: Memperbarui akun game
+app.put('/api/game-accounts/:id', (req, res) => {
+  const accountId = req.params.id;
+  const {
+    gameId, title, level, rank, price, description, images,
+    contactType, contactValue
+  } = req.body;
+
+  const query = `
+    UPDATE game_accounts
+    SET game_id = ?, title = ?, level = ?, rank = ?, price = ?, description = ?, images = ?,
+        contact_type = ?, contact_value = ?
+    WHERE id = ?
+  `;
+  
+  db.query(query, [gameId, title, level, rank, price, description, JSON.stringify(images),
+    contactType, contactValue, accountId], (err, results) => {
+    if (err) {
+      console.error('Error updating game account:', err);
+      return res.status(500).json({ success: false, message: 'Error updating data' });
+    }
+    res.json({ success: true, message: 'Akun game berhasil diperbarui!' });
+  });
+});
+
+// API: Menghapus akun game
+app.delete('/api/game-accounts/:id', (req, res) => {
+  const accountId = req.params.id;
+
+  const query = `
+    DELETE FROM game_accounts WHERE id = ?
+  `;
+  
+  db.query(query, [accountId], (err, results) => {
+    if (err) {
+      console.error('Error deleting game account:', err);
+      return res.status(500).json({ success: false, message: 'Error deleting data' });
+    }
+    res.json({ success: true, message: 'Akun game berhasil dihapus!' });
+  });
+});
+
+// Server berjalan di port 5000
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
+});
+
 // ===== END DEBUG ENDPOINTS =====
 
 // Error handling middleware

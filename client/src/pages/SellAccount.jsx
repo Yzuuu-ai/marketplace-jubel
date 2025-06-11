@@ -1,4 +1,3 @@
-// src/pages/SellAccount.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
@@ -19,29 +18,44 @@ const SellAccount = () => {
     rank: '',
     price: '',
     description: '',
-    images: [], // Changed to array for multiple images
-    contactType: 'whatsapp', // Default contact type
-    contactValue: '' // Single contact value
+    images: [],
+    contactType: 'whatsapp',
+    contactValue: ''
   });
   const [games, setGames] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-  const [previewImages, setPreviewImages] = useState([]); // Array for multiple previews
+  const [previewImages, setPreviewImages] = useState([]);
   const [myListings, setMyListings] = useState([]);
   const [filterStatus, setFilterStatus] = useState('all');
 
+  // Fetch games from API
   useEffect(() => {
-    if (!isAuthenticated) {
+    const fetchGames = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/api/games');
+        const data = await response.json();
+        
+        if (data.success) {
+          setGames(data.games);
+        }
+      } catch (error) {
+        console.error('Error fetching games:', error);
+        setGames([  // Fallback to local games if the API fails
+          { id: 1, name: 'Mobile Legends', code: 'ML', image: '/images/games/ml.jpg' },
+          { id: 2, name: 'PUBG Mobile', code: 'PUBG', image: '/images/games/pubg.jpg' },
+          { id: 3, name: 'Free Fire', code: 'FF', image: '/images/games/ff.jpg' },
+          { id: 4, name: 'Genshin Impact', code: 'GI', image: '/images/games/genshin.jpg' }
+        ]);
+      }
+    };
+    
+    if (isAuthenticated) {
+      fetchGames();
+    } else {
       navigate('/login');
     }
-    
-    setGames([
-      { id: 1, name: 'Mobile Legends', code: 'ML', image: '/images/games/ml.jpg' },
-      { id: 2, name: 'PUBG Mobile', code: 'PUBG', image: '/images/games/pubg.jpg' },
-      { id: 3, name: 'Free Fire', code: 'FF', image: '/images/games/ff.jpg' },
-      { id: 4, name: 'Genshin Impact', code: 'GI', image: '/images/games/genshin.jpg' }
-    ]);
   }, [isAuthenticated, navigate]);
 
   const generateAccountTitle = useCallback((gameId) => {
@@ -53,37 +67,54 @@ const SellAccount = () => {
     return `${game.code}-${nextNumber.toString().padStart(3, '0')}`;
   }, [games]);
 
-  const getMyListings = useCallback(() => {
-    const allAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
-    const myAccounts = allAccounts.filter(acc => acc.sellerWallet === walletAddress);
-    
-    // Add escrow status to accounts
-    const accountsWithEscrow = myAccounts.map(account => {
-      if (account.escrowId) {
-        const escrowTx = escrowTransactions.find(tx => tx.id === account.escrowId);
-        if (escrowTx) {
-          return {
-            ...account,
-            escrowStatus: escrowTx.status,
-            escrowTransaction: escrowTx
-          };
+  // Fetch listings from API
+  const getMyListings = useCallback(async () => {
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/game-accounts?sellerWallet=${walletAddress}&isAvailable=${filterStatus === 'available'}`
+      );
+      const data = await response.json();
+      
+      if (data.success) {
+        let accounts = data.accounts;
+        
+        // Add escrow status to accounts
+        const accountsWithEscrow = accounts.map(account => {
+          if (account.escrow_id) {
+            const escrowTx = escrowTransactions.find(tx => tx.id === account.escrow_id);
+            if (escrowTx) {
+              return {
+                ...account,
+                escrowStatus: escrowTx.status,
+                escrowTransaction: escrowTx
+              };
+            }
+          }
+          return account;
+        });
+        
+        // Apply filters
+        if (filterStatus === 'available') {
+          return accountsWithEscrow.filter(acc => !acc.is_sold && !acc.is_in_escrow);
+        } else if (filterStatus === 'sold') {
+          return accountsWithEscrow.filter(acc => acc.is_sold);
+        } else if (filterStatus === 'escrow') {
+          return accountsWithEscrow.filter(acc => acc.is_in_escrow);
         }
+        
+        return accountsWithEscrow;
       }
-      return account;
-    });
-    
-    if (filterStatus === 'available') {
-      return accountsWithEscrow.filter(acc => !acc.isSold && !acc.isInEscrow);
-    } else if (filterStatus === 'sold') {
-      return accountsWithEscrow.filter(acc => acc.isSold);
-    } else if (filterStatus === 'escrow') {
-      return accountsWithEscrow.filter(acc => acc.isInEscrow);
+      
+      return [];
+    } catch (error) {
+      console.error('Error fetching listings:', error);
+      return [];
     }
-    return accountsWithEscrow;
   }, [walletAddress, filterStatus, escrowTransactions]);
 
-  const refreshListings = useCallback(() => {
-    setMyListings(getMyListings());
+  const refreshListings = useCallback(async () => {
+    const listings = await getMyListings();
+    setMyListings(listings);
   }, [getMyListings]);
 
   useEffect(() => {
@@ -99,7 +130,6 @@ const SellAccount = () => {
     if (name === 'gameId' && value) {
       const selectedGame = games.find(g => g.id === parseInt(value));
       newFormData.title = generateAccountTitle(value);
-      // Set default image if no images uploaded
       if (newFormData.images.length === 0) {
         newFormData.images = [selectedGame?.image || '/images/games/default.jpg'];
         setPreviewImages([selectedGame?.image || '/images/games/default.jpg']);
@@ -110,7 +140,7 @@ const SellAccount = () => {
 
   const handleImageUpload = (e) => {
     const files = Array.from(e.target.files);
-    const maxImages = 5; // Maximum 5 images
+    const maxImages = 5;
     
     if (files.length + formData.images.length > maxImages) {
       alert(`Maksimal ${maxImages} gambar yang dapat diunggah`);
@@ -145,76 +175,63 @@ const SellAccount = () => {
     setPreviewImages(newPreviews);
   };
 
-  const handleSubmit = (e) => {
+  // Handle form submission with API
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
     setError('');
 
     try {
-      if (!formData.gameId || !formData.title || !formData.price) {
+      if (!formData.gameId || !formData.price || !formData.contactValue.trim()) {
         throw new Error('Harap isi semua field yang wajib diisi');
       }
-
-      if (!formData.contactValue.trim()) {
-        throw new Error('Harap isi informasi kontak');
-      }
       
-      // Get user profile for seller name
-      const userProfiles = JSON.parse(localStorage.getItem('userProfiles') || '{}');
-      const sellerProfile = userProfiles[walletAddress];
-      const sellerName = sellerProfile?.nama || `Seller-${walletAddress.substring(0, 6)}`;
+      // Get user ID from session
+      const session = JSON.parse(localStorage.getItem('currentSession') || '{}');
+      const sellerId = session.userId || null;
       
-      const existingAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
+      const apiData = {
+        gameId: parseInt(formData.gameId),
+        title: formData.title,
+        level: formData.level,
+        rank: formData.rank,
+        price: parseFloat(formData.price),
+        description: formData.description,
+        images: formData.images,
+        contactType: formData.contactType,
+        contactValue: formData.contactValue,
+        sellerWallet: walletAddress,
+        sellerId: sellerId
+      };
 
-      // Use first image as main image, or default
-      const mainImage = formData.images.length > 0 ? formData.images[0] : '/images/games/default.jpg';
-
+      let response;
       if (isEditing) {
-        const updatedAccounts = existingAccounts.map(acc =>
-          acc.id === editingAccountId
-            ? {
-                ...acc,
-                gameId: parseInt(formData.gameId),
-                title: formData.title,
-                level: formData.level,
-                rank: formData.rank,
-                price: `${formData.price} ETH`,
-                description: formData.description,
-                image: mainImage,
-                images: formData.images,
-                sellerName: sellerName,
-                contactType: formData.contactType,
-                contactValue: formData.contactValue
-              }
-            : acc
-        );
-        localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
+        // Update existing account
+        response = await fetch(`http://localhost:5000/api/game-accounts/${editingAccountId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(apiData)
+        });
       } else {
-        const newAccount = {
-          id: Date.now(),
-          gameId: parseInt(formData.gameId),
-          title: formData.title,
-          level: formData.level,
-          rank: formData.rank,
-          price: `${formData.price} ETH`,
-          description: formData.description,
-          image: mainImage,
-          images: formData.images,
-          sellerWallet: walletAddress,
-          sellerName: sellerName,
-          contactType: formData.contactType,
-          contactValue: formData.contactValue,
-          createdAt: new Date().toISOString(),
-          isSold: false,
-          isInEscrow: false,
-          soldAt: null,
-          buyerWallet: null,
-          buyerName: null
-        };
-        const updatedAccounts = [...existingAccounts, newAccount];
-        localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
+        // Create new account
+        response = await fetch('http://localhost:5000/api/game-accounts', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(apiData)
+        });
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Gagal menyimpan akun');
       }
       
+      // Reset form
       setFormData({
         gameId: '',
         title: '',
@@ -246,77 +263,71 @@ const SellAccount = () => {
     }
   };
 
-  const handleDelete = (id) => {
+  // Handle account deletion with API
+  const handleDelete = async (id) => {
     const account = myListings.find(acc => acc.id === id);
-    if (account.isInEscrow) {
+    if (account.is_in_escrow) {
       alert('Tidak dapat menghapus akun yang sedang dalam proses escrow');
       return;
     }
     
     if (window.confirm('Yakin ingin menghapus akun ini?')) {
-      const existingAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]');
-      const updatedAccounts = existingAccounts.filter(acc => acc.id !== id);
-      localStorage.setItem('gameAccounts', JSON.stringify(updatedAccounts));
-      refreshListings();
+      try {
+        const response = await fetch(`http://localhost:5000/api/game-accounts/${id}?sellerWallet=${walletAddress}`, {
+          method: 'DELETE'
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.message || 'Gagal menghapus akun');
+        }
+        
+        refreshListings();
+      } catch (error) {
+        console.error('Error deleting account:', error);
+        alert('Gagal menghapus akun: ' + error.message);
+      }
     }
   };
 
   const handleEdit = (account) => {
-    if (account.isSold || account.isInEscrow) {
+    if (account.is_sold || account.is_in_escrow) {
       alert('Akun yang sudah terjual atau dalam escrow tidak dapat diedit');
       return;
     }
 
-    // Handle old data format (with whatsapp, instagram, telegram fields)
-    let contactType = 'whatsapp';
-    let contactValue = '';
-    
-    if (account.contactType && account.contactValue) {
-      // New format
-      contactType = account.contactType;
-      contactValue = account.contactValue;
-    } else {
-      // Old format - get the first available contact
-      if (account.whatsapp) {
-        contactType = 'whatsapp';
-        contactValue = account.whatsapp;
-      } else if (account.instagram) {
-        contactType = 'instagram';
-        contactValue = account.instagram;
-      } else if (account.telegram) {
-        contactType = 'telegram';
-        contactValue = account.telegram;
-      }
-    }
-
     setFormData({
-      gameId: account.gameId.toString(),
+      gameId: account.game_id.toString(),
       title: account.title,
       level: account.level || '',
       rank: account.rank || '',
-      price: account.price.replace(' ETH', ''),
+      price: account.price.toString().replace(' ETH', ''),
       description: account.description || '',
-      images: account.images || [account.image] || [],
-      contactType: contactType,
-      contactValue: contactValue
+      images: account.images || [],
+      contactType: account.contact_type || 'whatsapp',
+      contactValue: account.contact_value || ''
     });
-    setPreviewImages(account.images || [account.image] || []);
+    setPreviewImages(account.images || []);
     setIsEditing(true);
     setEditingAccountId(account.id);
     setActiveTab('sell');
   };
 
-  const getAccountStats = () => {
-    const allMyAccounts = JSON.parse(localStorage.getItem('gameAccounts') || '[]')
-      .filter(acc => acc.sellerWallet === walletAddress);
+  // Calculate account statistics
+  const getAccountStats = useCallback(() => {
+    const total = myListings.length;
+    const available = myListings.filter(acc => !acc.is_sold && !acc.is_in_escrow).length;
+    const sold = myListings.filter(acc => acc.is_sold).length;
+    const inEscrow = myListings.filter(acc => acc.is_in_escrow).length;
     
     return {
-      total: allMyAccounts.length,
-      available: allMyAccounts.filter(acc => !acc.isSold && !acc.isInEscrow).length,
-      sold: allMyAccounts.filter(acc => acc.isSold).length,
-      inEscrow: allMyAccounts.filter(acc => acc.isInEscrow).length
+      total,
+      available,
+      sold,
+      inEscrow
     };
-  };
+  }, [myListings]);
 
   const stats = getAccountStats();
 
@@ -331,7 +342,7 @@ const SellAccount = () => {
   };
 
   const getContactDisplay = (account) => {
-    if (account.contactType && account.contactValue) {
+    if (account.contact_type && account.contact_value) {
       const icons = {
         whatsapp: '📱',
         instagram: '📷',
@@ -342,13 +353,8 @@ const SellAccount = () => {
         instagram: 'IG',
         telegram: 'TG'
       };
-      return `${icons[account.contactType]} ${labels[account.contactType]}: ${account.contactValue}`;
+      return `${icons[account.contact_type]} ${labels[account.contact_type]}: ${account.contact_value}`;
     }
-    
-    // Handle old format
-    if (account.whatsapp) return `📱 WA: ${account.whatsapp}`;
-    if (account.instagram) return `📷 IG: ${account.instagram}`;
-    if (account.telegram) return `✈️ TG: ${account.telegram}`;
     
     return null;
   };
@@ -621,11 +627,7 @@ const SellAccount = () => {
                             name="contactValue"
                             value={formData.contactValue}
                             onChange={handleChange}
-                            placeholder={
-                              formData.contactType === 'whatsapp' ? '628123456789' :
-                              formData.contactType === 'instagram' ? '@username' :
-                              '@username'
-                            }
+                            placeholder={formData.contactType === 'whatsapp' ? '628123456789' : formData.contactType === 'instagram' ? '@username' : '@username'}
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
                             required
                           />
@@ -661,33 +663,25 @@ const SellAccount = () => {
                 <div className="flex gap-2">
                   <button
                     onClick={() => setFilterStatus('all')}
-                    className={`px-3 py-1 rounded-lg text-sm font-medium transition ${
-                      filterStatus === 'all' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-700'
-                    }`}
+                    className={`px-3 py-1 rounded-lg text-sm font-medium transition ${filterStatus === 'all' ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-700'}`}
                   >
                     Semua ({stats.total})
                   </button>
                   <button
                     onClick={() => setFilterStatus('available')}
-                    className={`px-3 py-1 rounded-lg text-sm font-medium transition ${
-                      filterStatus === 'available' ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-700'
-                    }`}
+                    className={`px-3 py-1 rounded-lg text-sm font-medium transition ${filterStatus === 'available' ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-700'}`}
                   >
                     Tersedia ({stats.available})
                   </button>
                   <button
                     onClick={() => setFilterStatus('escrow')}
-                    className={`px-3 py-1 rounded-lg text-sm font-medium transition ${
-                      filterStatus === 'escrow' ? 'bg-purple-600 text-white' : 'bg-gray-200 text-gray-700'
-                    }`}
+                    className={`px-3 py-1 rounded-lg text-sm font-medium transition ${filterStatus === 'escrow' ? 'bg-purple-600 text-white' : 'bg-gray-200 text-gray-700'}`}
                   >
                     Escrow ({stats.inEscrow})
                   </button>
                   <button
                     onClick={() => setFilterStatus('sold')}
-                    className={`px-3 py-1 rounded-lg text-sm font-medium transition ${
-                      filterStatus === 'sold' ? 'bg-red-600 text-white' : 'bg-gray-200 text-gray-700'
-                    }`}
+                    className={`px-3 py-1 rounded-lg text-sm font-medium transition ${filterStatus === 'sold' ? 'bg-red-600 text-white' : 'bg-gray-200 text-gray-700'}`}
                   >
                     Terjual ({stats.sold})
                   </button>
@@ -707,33 +701,35 @@ const SellAccount = () => {
             ) : (
               <div className="space-y-4">
                 {myListings.map(account => {
-                  const game = games.find(g => g.id === account.gameId);
+                  const game = games.find(g => g.id === account.game_id);
                   const contactInfo = getContactDisplay(account);
                   
+
                   return (
                     <div key={account.id} className="bg-white rounded-lg shadow p-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
                           <img 
-                            src={account.images?.[0] || account.image} 
+                            src={account.images?.[0] || '/images/games/default.jpg'} 
                             alt={account.title} 
                             className="w-16 h-16 rounded-lg object-cover"
                           />
                           <div>
                             <h3 className="font-semibold text-gray-900">{account.title}</h3>
-                            <p className="text-sm text-gray-600">{game?.name} • {account.price}</p>
+                            <p className="text-sm text-gray-600">{game?.name} • {account.price} ETH</p>
                             {account.level && <p className="text-sm text-gray-500">Level: {account.level}</p>}
                           </div>
                         </div>
                         
                         <div className="flex items-center gap-2">
-                          {account.isInEscrow && account.escrowStatus && getEscrowStatusBadge(account)}
+                          {account.is_in_escrow && account.escrowStatus && getEscrowStatusBadge(account)}
                           
-                          {account.isSold ? (
+
+                          {account.is_sold ? (
                             <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
                               Terjual
                             </span>
-                          ) : account.isInEscrow ? (
+                          ) : account.is_in_escrow ? (
                             <button
                               onClick={() => navigate('/escrow')}
                               className="px-3 py-1 bg-purple-600 text-white rounded text-sm hover:bg-purple-700 transition"
@@ -773,14 +769,6 @@ const SellAccount = () => {
           </div>
         </section>
       )}
-
-      <footer className="bg-gray-900 text-white mt-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="text-center text-gray-400">
-            <p>&copy; 2025 GameMarket. All rights reserved.</p>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 };
